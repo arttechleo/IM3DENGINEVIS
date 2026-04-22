@@ -1,0 +1,80 @@
+#define RADIUS_SIGMA sqrt(8.0)
+#define RADIUS_SIGMA_OVER_SQRT_2 (RADIUS_SIGMA / sqrt(2.0))
+#define CUTOFF_RADIUS_SIGMA_SQUARED_OVER_2 (RADIUS_SIGMA_OVER_SQRT_2 * RADIUS_SIGMA_OVER_SQRT_2)
+
+#define DISTANCE_PRECISION 16
+#define DISTANCE_SCALE ((1 << DISTANCE_PRECISION) - 2)
+#define DISTANCE_NOT_VISIBLE ((1 << DISTANCE_PRECISION) - 1)
+
+#define SH_C0 0.28209479177387814
+
+float3 ReadPosition(Texture2D<float4> tex, uint idx, uint tex_width)
+{
+    uint2 tc = uint2(idx % tex_width, idx / tex_width);
+    float4 t = tex.Load(int3(tc, 0));
+    return t.rgb * 100.0;
+}
+
+float4 ReadRotation(Texture2D<float4> tex, uint idx, uint tex_width)
+{
+    uint2 tc = uint2(idx % tex_width, idx / tex_width);
+    float4 t = tex.Load(int3(tc, 0));
+    return t.rgba;
+}
+
+float3x3 ReadCovariance(Texture2D<float4> cov1_tex, Texture2D<float4> cov2_tex, uint idx, uint tex_width)
+{
+    uint2 tc = uint2(idx % tex_width, idx / tex_width);
+    float4 c1 = cov1_tex.Load(int3(tc, 0));
+    float4 c2 = cov2_tex.Load(int3(tc, 0));
+    return float3x3(
+        c1.x, c1.y, c1.z,
+        c1.y, c1.w, c2.x,
+        c1.z, c2.x, c2.y
+    );
+}
+
+float3 ReadScale(Texture2D<float4> tex, uint idx, uint tex_width)
+{
+    uint2 tc = uint2(idx % tex_width, idx / tex_width);
+    float4 t = tex.Load(int3(tc, 0));
+    return t.rgb * 100.0;
+}
+
+float ReadOpacity(Texture2D<float4> tex, uint idx, uint tex_width)
+{
+    uint2 tc = uint2(idx % tex_width, idx / tex_width);
+    return tex.Load(int3(tc, 0)).a;
+}
+
+float3 SRGBToLinear(float3 srgb)
+{
+    return pow(srgb, 2.2);
+}
+
+float3 ReadColorSH0(Texture2D<float4> tex, uint idx, uint tex_width)
+{
+    uint2 tc = uint2(idx % tex_width, idx / tex_width);
+    float3 sh0 = tex.Load(int3(tc, 0)).rgb;
+    float3 color_srgb = saturate(sh0 * SH_C0 + 0.5);
+    return SRGBToLinear(color_srgb);
+}
+
+float3x3 ComputeCovariance(float4 q, float3 s)
+{
+    float x = q.x, y = q.y, z = q.z, w = q.w;
+
+    float3x3 R = float3x3(
+        1.0 - 2.0*(y*y + z*z), 2.0*(x*y - w*z),       2.0*(x*z + w*y),
+        2.0*(x*y + w*z),       1.0 - 2.0*(x*x + z*z),  2.0*(y*z - w*x),
+        2.0*(x*z - w*y),       2.0*(y*z + w*x),         1.0 - 2.0*(x*x + y*y)
+    );
+
+    float3x3 M = float3x3(
+        R[0] * s,
+        R[1] * s,
+        R[2] * s
+    );
+
+    return mul(M, transpose(M));
+}

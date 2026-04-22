@@ -1,0 +1,14 @@
+#include "/Engine/Public/Platform.ush"
+
+Buffer<uint> visible_count;
+RWBuffer<uint> indirect_args;
+
+[numthreads(1, 1, 1)]
+void main(uint3 dispatch_thread_id : SV_DispatchThreadID)
+{
+    uint count = visible_count[0];
+    indirect_args[0] = count * 6;
+    indirect_args[1] = 1;
+    indirect_args[2] = 0;
+    indirect_args[3] = 0;
+}

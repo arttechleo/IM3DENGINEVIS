@@ -1,0 +1,67 @@
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Public/Platform.ush"
+#include "CSGaussianCommon.ush"
+
+Texture2D<float4> PositionTexture;
+Texture2D<float4> SH0Texture;
+Texture2D<float4> Cov2OpacityTexture;
+uint texture_width;
+float brightness;
+
+float4x4 local_to_world;
+Buffer<uint> sorted_indices;
+Buffer<float4> computed_transforms;
+
+float4 CSGaussianWorldToClip(float3 worldPos)
+{
+    ResolvedView = ResolveView();
+    worldPos += local_to_world[3].xyz + ResolvedView.PreViewTranslationHigh;
+    return mul(float4(worldPos, 1), ResolvedView.TranslatedWorldToClip);
+}
+
+float2 CSGaussianGetResolution()
+{
+    return View.ViewSizeAndInvSize.xy / View.ViewResolutionFraction;
+}
+
+void main(
+    in uint vertexID : SV_VertexID,
+    out float2 out_gaussianUV : GAUSSIAN_UV,
+    out nointerpolation float4 out_color : SPLAT_COLOR,
+    out float4 out_position : SV_Position)
+{
+    uint gaussianIdx = sorted_indices[vertexID / 6];
+
+    float3 posLocal = ReadPosition(PositionTexture, gaussianIdx, texture_width);
+    float3 posWorld = mul(posLocal, (float3x3)local_to_world);
+    float4 posClip = CSGaussianWorldToClip(posWorld);
+
+    float4 splatTransform = computed_transforms[gaussianIdx];
+
+    if (dot(splatTransform, splatTransform) == 0.0 || posClip.w <= 0.0)
+    {
+        out_position = float4(0, 0, 0, 0);
+        out_gaussianUV = float2(0, 0);
+        out_color = float4(0, 0, 0, 0);
+        return;
+    }
+
+    float2 quadCorners[6] = {
+        float2(-RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+        float2( RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+        float2(-RADIUS_SIGMA_OVER_SQRT_2,  RADIUS_SIGMA_OVER_SQRT_2),
+        float2( RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+        float2(-RADIUS_SIGMA_OVER_SQRT_2,  RADIUS_SIGMA_OVER_SQRT_2),
+        float2( RADIUS_SIGMA_OVER_SQRT_2,  RADIUS_SIGMA_OVER_SQRT_2)
+    };
+
+    float2 ndcOffset = mul(float2x2(splatTransform.x, splatTransform.y, splatTransform.z, splatTransform.w), quadCorners[vertexID % 6]);
+    ndcOffset /= CSGaussianGetResolution();
+
+    out_position = float4(posClip.xy + ndcOffset * posClip.w, posClip.z, posClip.w);
+    out_gaussianUV = quadCorners[vertexID % 6];
+
+    float3 color = ReadColorSH0(SH0Texture, gaussianIdx, texture_width) * brightness;
+    float opacity = ReadOpacity(Cov2OpacityTexture, gaussianIdx, texture_width);
+    out_color = float4(color, opacity);
+}
