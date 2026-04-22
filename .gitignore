@@ -1,0 +1,28 @@
+# AppleDouble / resource forks
+._*
+**/._*
+
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+*.sln
+*.suo
+Plugins/MLSLabsRenderer/Binaries/
+Plugins/MLSLabsRenderer/Intermediate/
+Plugins/UnrealClaude/Binaries/
+Plugins/UnrealClaude/Intermediate/
+Content/GaussianSplats/*.ply
+Content/GaussianSplats/*.spz
+Config/DefaultGame.ini
+
+# Editor / OS (keep small noise out of repo)
+.idea/
+*.sln.DotSettings.user
+.DS_Store
+*.xcworkspace/xcuserdata/
+*.VC.db
+*.opensdf
+*.sdf
