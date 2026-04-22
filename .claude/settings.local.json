@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"/Users/Shared/Epic Games/UE_5.7/Engine/Build/BatchFiles/Mac/Build.sh\" VirtualProductionSplatEditor Mac Development)",
+      "Bash(\"/Users/Shared/Epic Games/UE_5.7/Engine/Build/BatchFiles/Mac/Build.sh\" VirtualProductionSplatEditor Mac Development -Project=\"/Users/student/Documents/Unreal Projects/AIProject/AIProject.uproject\")",
+      "Bash(ls:*)",
+      "Bash(\"/Users/Shared/Epic Games/UE_5.7/Engine/Build/BatchFiles/Mac/Build.sh\" VirtualProductionSplatEditor Mac Development -Project=\"/Users/student/Documents/Unreal Projects/AIProject/VirtualProductionSplat.uproject\")",
+      "Bash(curl:*)",
+      "Bash(python3 -c ':*)",
+      "Bash('/Users/Shared/Epic Games/UE_5.7/Engine/Binaries/ThirdParty/Python3/Mac/bin/python3' Source/VirtualProductionSplatEditor/ConvertSpzToPly.py Content/GaussianSplats/WorldLabs_129102e0-0fdc-488f-b5b1-c2e7bfe17a70_500k.spz Content/GaussianSplats/test_output.ply)",
+      "Bash(rm -rf \"/Users/student/Library/Application Support/Epic/UnrealEngine/Common/DerivedDataCache\")",
+      "Read(//Users/student/Library/Application Support/Epic/UnrealEngine/Common/**)",
+      "Bash(git --version)",
+      "Bash(git clone *)",
+      "Bash(mv /S/Projects/2026/UnrealEngine/IntroVP/Plugins/UnrealClaude/UnrealClaude /S/Projects/2026/UnrealEngine/IntroVP/Plugins/UnrealClaude_tmp)",
+      "Bash(rm -rf /S/Projects/2026/UnrealEngine/IntroVP/Plugins/UnrealClaude)",
+      "Bash(mv /S/Projects/2026/UnrealEngine/IntroVP/Plugins/UnrealClaude_tmp /S/Projects/2026/UnrealEngine/IntroVP/Plugins/UnrealClaude)",
+      "Bash(/S/EpicGamesLauncher/UE_5.7/Engine/Build/BatchFiles/Build.bat VirtualProductionSplatEditor *)",
+      "PowerShell(Move-Item *)",
+      "Bash(/S/EpicGamesLauncher/UE_5.7/Engine/Binaries/ThirdParty/Python3/Win64/python.exe *)",
+      "PowerShell(Get-ChildItem \"S:\\\\Projects\\\\2026\\\\UnrealEngine\\\\AIProject\\\\Plugins\\\\MLSLabsRenderer\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object FullName | Format-List)"
+    ]
+  }
+}
