@@ -1,5 +1,23 @@
 # VirtualProductionSplat — Claude Project Context
 
+## Daily Workflow
+- **Build:**  `Tools\build.bat`   (runs preflight → Build.bat)
+- **Launch:** `Tools\launch.bat`  (runs preflight → editor -dx12)
+- **MLSLabsRenderer broken?** Run: `Tools\fix_mlslabs.bat`
+
+## Pre-flight Checks (`Tools/preflight.py`)
+Run manually: `python Tools/preflight.py`  
+Exit 0 = all clear. Exit 1 = fix FAILs before proceeding.  
+17 checks: API keys, plugin health, source hygiene, Python deps, git state.
+
+## MLSLabsRenderer Rules
+- **NEVER** modify files inside `Plugins/MLSLabsRenderer/`
+- **NEVER** let `git filter-repo` or `git clean` touch ThirdParty DLLs
+- `torch_cuda.dll` source of truth: `libtorch-win-shared-with-deps-2.7.0+cu128/libtorch/lib/`
+- Plugin LoadingPhase is `PostConfigInit` (vendor default) — do not change
+- All splat loading goes through `GaussianSplatImportRunner` / `MLSGaussianSplatInterop` — no direct MLSLabsRenderer API calls from new code
+- If plugin fails: `Tools\fix_mlslabs.bat`
+
 ## Pipeline
 Greybox scene in UE5 → **single 360° equirectangular PNG** (cube capture) → WorldLabs Marble (`world_prompt.type`: **`image`**) → Gaussian Splat (.ply) → SplatRenderer Plugin in UE5 → Virtual Production / ICVFX stage
 

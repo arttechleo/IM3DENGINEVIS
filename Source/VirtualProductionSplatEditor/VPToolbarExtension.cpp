@@ -136,7 +136,7 @@ void FVPToolbarExtension::OnSubmitToWorldLabs()
 
 	TSharedRef<SWindow> DialogWindow = SNew(SWindow)
 		.Title(NSLOCTEXT("VPToolbarExtension", "SubmitWLTitle", "Submit to WorldLabs"))
-		.ClientSize(FVector2D(600.f, 500.f))
+		.ClientSize(FVector2D(640.f, 720.f))
 		.SupportsMinimize(false)
 		.SupportsMaximize(false)
 		.IsTopmostWindow(true)
@@ -154,11 +154,13 @@ void FVPToolbarExtension::OnSubmitToWorldLabs()
 
 	const FString Prompt = DialogContent->GetPrompt();
 	const FString Model = DialogContent->GetModel();
+	const TArray<FString> RefImages = DialogContent->GetReferenceImagePaths();
 
 	if (AWorldLabsRunner* Runner = Cast<AWorldLabsRunner>(Runners[0]))
 	{
 		Runner->WorldPrompt = Prompt;
 		Runner->ModelName = Model;
+		Runner->StyleReferenceImagePaths = RefImages;
 		Runner->SubmitToWorldLabs();
 	}
 }
