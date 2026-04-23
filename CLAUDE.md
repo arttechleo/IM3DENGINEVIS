@@ -8,7 +8,7 @@
 ## Pre-flight Checks (`Tools/preflight.py`)
 Run manually: `python Tools/preflight.py`  
 Exit 0 = all clear. Exit 1 = fix FAILs before proceeding.  
-17 checks: API keys, plugin health, source hygiene, Python deps, git state.
+18 checks: API keys, plugin health, source hygiene, Python deps, git state, submodule init.
 
 ## MLSLabsRenderer Rules
 - **NEVER** modify files inside `Plugins/MLSLabsRenderer/`
@@ -27,7 +27,7 @@ Greybox scene in UE5 → **single 360° equirectangular PNG** (cube capture) →
 - Content/VirtualProduction/ — ICVFX and nDisplay configs
 - Source/VirtualProductionSplat/ — C++ source
 - Plugins/SplatRenderer/     — Gaussian Splat .ply renderer (DazaiStudio)
-- Plugins/UnrealClaude/      — Claude Code CLI in-editor integration (Natfii)
+- Plugins/UnrealClaude/      — Claude Code CLI in-editor (submodule: github.com/Natfii/UnrealClaude; actual plugin at `Plugins/UnrealClaude/UnrealClaude/`)
 - Saved/GreyboxExports/      — auto-generated **`panorama_360.png`** (equirectangular; gitignored)
 
 ## Key Systems
@@ -86,7 +86,7 @@ Greybox scene in UE5 → **single 360° equirectangular PNG** (cube capture) →
 - nDisplay and full ICVFX output targets: Windows / Linux (nDisplay SupportedTargetPlatforms excludes Mac)
 - SplatRenderer compiled with deprecation warnings in CSGaussianBuffers.h — upstream issue, do not modify
 - Node.js required for UnrealClaude MCP bridge:
-    cd "Plugins/UnrealClaude/Resources/mcp-bridge" && npm install
+    cd "Plugins/UnrealClaude/UnrealClaude/Resources/mcp-bridge" && npm install
 
 ## Config — DefaultGame.ini
 [WorldLabsAPI]
@@ -104,9 +104,10 @@ APIKey=YOUR_KEY_HERE
 
 ### One-time setup
 
-1. Add `APIKey` to `Config/DefaultGame.ini` under `[WorldLabsAPI]`
-2. `npm install` in `Plugins/UnrealClaude/Resources/mcp-bridge/` (requires Node.js)
-3. Open UE5 editor and open `Content/Greybox/GreyboxScene.umap` (create/save the level if it does not exist yet)
+1. After clone: `git submodule update --init --recursive`
+2. Add `APIKey` to `Config/DefaultGame.ini` under `[WorldLabsAPI]`
+3. `npm install` in `Plugins/UnrealClaude/UnrealClaude/Resources/mcp-bridge/` (requires Node.js; note double `UnrealClaude` in path)
+4. Open UE5 editor and open `Content/Greybox/GreyboxScene.umap` (create/save the level if it does not exist yet)
 
 ### Per-session pipeline
 
@@ -213,4 +214,4 @@ Adjust parsing in `OnGenerationResponse` / `OnPollOperationResponse` / `OnFetchW
 - Optional Blueprints: **`BP_PanoramicCapture360`** (parent **`APanoramicCapture360`**), **`BP_CameraTracker`**, EUW widgets
 - **WorldLabs**: real API field names / auth if different from assumptions
 - **nDisplay / ICVFX** production setup on **Win64/Linux**; content packaging for LED
-- **UnrealClaude** `npm install` when using MCP bridge
+- **UnrealClaude** `npm install` in `Plugins/UnrealClaude/UnrealClaude/Resources/mcp-bridge/` when using MCP bridge

@@ -1,0 +1,3 @@
+[submodule "Plugins/UnrealClaude"]
+	path = Plugins/UnrealClaude
+	url = https://github.com/Natfii/UnrealClaude.git
