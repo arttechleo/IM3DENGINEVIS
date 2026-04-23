@@ -7,6 +7,7 @@
 #include "Types/SlateEnums.h"
 #include "Widgets/Views/ITableRow.h"
 #include "Widgets/Views/STableViewBase.h"
+#include "Containers/Ticker.h"
 #include "WorldLabsPromptBuilder.h"
 
 class SWindow;
@@ -89,7 +90,7 @@ private:
 	UClaudePromptRefiner* AnalyzeRefiner = nullptr; // AddToRoot'd while HTTP request is in flight
 	FString AnalyzeScreenshotPath;
 	double AnalyzeTickStart = 0.0;
-	FDelegateHandle AnalyzeTickerHandle;
+	FTSTicker::FDelegateHandle AnalyzeTickerHandle;
 
 	void LoadPromptHistory();
 	FReply OnCopyRefinedPromptClicked();

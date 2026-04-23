@@ -204,7 +204,7 @@ void SWorldLabsPromptDialog::Construct(const FArguments& InArgs)
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 4.f)
 			[
-				SNew(STextBlock).Text(NSLOCTEXT("WorldLabsPromptDialog", "PreviewLabel", "Generated Prompt Preview (editable — overrides auto-generated):"))
+				SNew(STextBlock).Text(NSLOCTEXT("WorldLabsPromptDialog", "PreviewLabel", "Generation Prompt (editable):"))
 			]
 			+ SVerticalBox::Slot().FillHeight(1.f)
 			[
@@ -334,7 +334,7 @@ SWorldLabsPromptDialog::~SWorldLabsPromptDialog()
 {
 	if (AnalyzeTickerHandle.IsValid())
 	{
-		FTicker::GetCoreTicker().RemoveTicker(AnalyzeTickerHandle);
+		FTSTicker::GetCoreTicker().RemoveTicker(AnalyzeTickerHandle);
 		AnalyzeTickerHandle.Reset();
 	}
 	if (AnalyzeRefiner)
@@ -611,7 +611,7 @@ TSharedRef<ITableRow> SWorldLabsPromptDialog::OnGenerateRefImageRow(
 	TSharedPtr<FString> Item,
 	const TSharedRef<STableViewBase>& OwnerTable)
 {
-	TWeakPtr<SWorldLabsPromptDialog> WeakThis(StaticCastSharedRef<SWorldLabsPromptDialog>(AsShared()));
+	TWeakPtr<SWorldLabsPromptDialog> DialogWeakPtr(StaticCastSharedRef<SWorldLabsPromptDialog>(AsShared()));
 
 	return SNew(STableRow<TSharedPtr<FString>>, OwnerTable)
 	[
@@ -625,9 +625,9 @@ TSharedRef<ITableRow> SWorldLabsPromptDialog::OnGenerateRefImageRow(
 		[
 			SNew(SButton)
 			.Text(FText::FromString(TEXT("x")))
-			.OnClicked_Lambda([WeakThis, Item]() -> FReply
+			.OnClicked_Lambda([DialogWeakPtr, Item]() -> FReply
 			{
-				if (TSharedPtr<SWorldLabsPromptDialog> Pinned = WeakThis.Pin())
+				if (TSharedPtr<SWorldLabsPromptDialog> Pinned = DialogWeakPtr.Pin())
 				{
 					Pinned->OnRemoveRefImage(Item);
 				}
@@ -672,17 +672,17 @@ FReply SWorldLabsPromptDialog::OnAnalyzeClicked()
 
 	if (AnalyzeTickerHandle.IsValid())
 	{
-		FTicker::GetCoreTicker().RemoveTicker(AnalyzeTickerHandle);
+		FTSTicker::GetCoreTicker().RemoveTicker(AnalyzeTickerHandle);
 	}
 
-	TWeakPtr<SWorldLabsPromptDialog> WeakThis(StaticCastSharedRef<SWorldLabsPromptDialog>(AsShared()));
+	TWeakPtr<SWorldLabsPromptDialog> DialogWeakPtr(StaticCastSharedRef<SWorldLabsPromptDialog>(AsShared()));
 	FString PathCopy = AnalyzeScreenshotPath;
 	double StartCopy = AnalyzeTickStart;
 
-	AnalyzeTickerHandle = FTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateLambda([WeakThis, PathCopy, StartCopy](float) -> bool
+	AnalyzeTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([DialogWeakPtr, PathCopy, StartCopy](float) -> bool
 		{
-			TSharedPtr<SWorldLabsPromptDialog> Pinned = WeakThis.Pin();
+			TSharedPtr<SWorldLabsPromptDialog> Pinned = DialogWeakPtr.Pin();
 			if (!Pinned.IsValid())
 			{
 				return false;
@@ -736,7 +736,7 @@ void SWorldLabsPromptDialog::DoAnalyzeWithScreenshot(const FString& ScreenshotPa
 		AnalyzeRefiner->AddToRoot();
 	}
 
-	TWeakPtr<SWorldLabsPromptDialog> WeakThis(StaticCastSharedRef<SWorldLabsPromptDialog>(AsShared()));
+	TWeakPtr<SWorldLabsPromptDialog> DialogWeakPtr(StaticCastSharedRef<SWorldLabsPromptDialog>(AsShared()));
 	UClaudePromptRefiner* RefinerRaw = AnalyzeRefiner;
 
 	TArray<FString> NoRefs;
@@ -745,7 +745,7 @@ void SWorldLabsPromptDialog::DoAnalyzeWithScreenshot(const FString& ScreenshotPa
 		ScreenshotPath,
 		UserIntent,
 		NoRefs,
-		FOnRefinedPrompt::CreateLambda([WeakThis, RefinerRaw](FString Refined)
+		FOnRefinedPrompt::CreateLambda([DialogWeakPtr, RefinerRaw](FString Refined)
 		{
 			// Always clean up root reference
 			if (RefinerRaw)
@@ -754,7 +754,7 @@ void SWorldLabsPromptDialog::DoAnalyzeWithScreenshot(const FString& ScreenshotPa
 			}
 
 			// Only update UI if dialog still alive
-			if (TSharedPtr<SWorldLabsPromptDialog> Pinned = WeakThis.Pin())
+			if (TSharedPtr<SWorldLabsPromptDialog> Pinned = DialogWeakPtr.Pin())
 			{
 				Pinned->AnalyzeRefiner = nullptr;
 				Pinned->OnAnalyzeRefineComplete(Refined);
