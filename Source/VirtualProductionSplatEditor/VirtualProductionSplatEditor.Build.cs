@@ -20,6 +20,7 @@ public class VirtualProductionSplatEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"InputCore",
+			"ApplicationCore",
 			"UnrealEd",
 			"Blutility",
 			"LevelEditor",
@@ -33,8 +34,10 @@ public class VirtualProductionSplatEditor : ModuleRules
 			"Kismet",
 			"PythonScriptPlugin",
 			"Json",
-			"RHI",         // GMaxRHIFeatureLevel
-			"RenderCore",  // GShaderCompilingManager (via ShaderCompiler.h in Engine)
+			"RHI",              // GMaxRHIFeatureLevel
+			"RenderCore",       // GShaderCompilingManager (via ShaderCompiler.h in Engine)
+			"DesktopPlatform",  // IDesktopPlatform file open dialog
+			"AssetRegistry",    // FAssetRegistryModule::GetRegistry().ScanPathsSynchronous
 		});
 	}
 }

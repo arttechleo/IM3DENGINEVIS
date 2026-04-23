@@ -12,6 +12,7 @@
 class SWindow;
 class SMultiLineEditableTextBox;
 class SEditableTextBox;
+class UClaudePromptRefiner;
 template <typename OptionType>
 class SComboBox;
 template <typename ItemType>
@@ -37,19 +38,25 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	virtual ~SWorldLabsPromptDialog();
 
-	FString GetPrompt() const { return EnteredPrompt; }
+	// Use UserEditedPrompt if user has manually typed; otherwise use auto-generated EnteredPrompt.
+	FString GetPrompt() const { return UserEditedPrompt.IsEmpty() ? EnteredPrompt : UserEditedPrompt; }
 	FString GetModel() const { return SelectedModel; }
 	bool WasSubmitted() const { return bSubmitted; }
+	const TArray<FString>& GetReferenceImagePaths() const { return ReferenceImagePaths; }
 
 private:
 	static constexpr int32 MaxHistoryEntries = 40;
+	static constexpr int32 MaxRefImages = 3;
 
 	TSharedPtr<SWindow> ParentWindow;
 
 	TSharedPtr<SMultiLineEditableTextBox> PreviewTextBox;
+	TSharedPtr<SMultiLineEditableTextBox> RefinedPromptTextBox;
 	TSharedPtr<SEditableTextBox> NotesTextBox;
 	TSharedPtr<SListView<TSharedPtr<FWorldLabsPromptHistoryEntry>>> HistoryListView;
+	TSharedPtr<SListView<TSharedPtr<FString>>> RefImagesListView;
 
 	TArray<TSharedPtr<FWorldLabsPromptHistoryEntry>> PromptHistory;
 	TArray<TSharedPtr<FString>> EnvironmentOptions;
@@ -63,6 +70,8 @@ private:
 	TSharedPtr<FString> SelectedModelItem;
 
 	FString EnteredPrompt;
+	FString UserEditedPrompt;           // Task 2: non-empty when user manually edits the preview box
+	FString LastRefinedPrompt;
 	FString SelectedEnvironment;
 	FString SelectedTimeOfDay;
 	FString SelectedMood;
@@ -72,7 +81,19 @@ private:
 	FWorldLabsSceneAnalysis SceneAnalysis;
 	FString AnalysisWarning;
 
+	// Task 3: Reference image paths
+	TArray<FString> ReferenceImagePaths;
+	TArray<TSharedPtr<FString>> RefImagePathItems;
+
+	// Task 6: Analyze Scene async state
+	UClaudePromptRefiner* AnalyzeRefiner = nullptr; // AddToRoot'd while HTTP request is in flight
+	FString AnalyzeScreenshotPath;
+	double AnalyzeTickStart = 0.0;
+	FDelegateHandle AnalyzeTickerHandle;
+
 	void LoadPromptHistory();
+	FReply OnCopyRefinedPromptClicked();
+	EVisibility GetRefinedPromptVisibility() const;
 	void SavePromptToHistory();
 	void UpdatePromptPreview();
 	void AnalyzeSceneAndRefresh();
@@ -84,6 +105,12 @@ private:
 	FReply OnAnalyzeClicked();
 	void OnHistoryItemSelected(TSharedPtr<FWorldLabsPromptHistoryEntry> Item, ESelectInfo::Type SelectType);
 	void OnNotesChanged(const FText& InText);
+
+	// Task 3: Reference image list
+	FReply OnAddRefImageClicked();
+	void OnRemoveRefImage(TSharedPtr<FString> Item);
+	TSharedRef<ITableRow> OnGenerateRefImageRow(TSharedPtr<FString> Item, const TSharedRef<STableViewBase>& OwnerTable);
+	EVisibility GetRefImagesListVisibility() const;
 
 	TSharedRef<ITableRow> OnGenerateHistoryRow(TSharedPtr<FWorldLabsPromptHistoryEntry> Item, const TSharedRef<STableViewBase>& OwnerTable);
 
@@ -99,4 +126,9 @@ private:
 	FText GetTimeOfDayLabel() const;
 	FText GetMoodLabel() const;
 	FText GetModelLabel() const;
+
+	// Task 6: Analyze Scene async helpers
+	bool PollForAnalyzeScreenshot(float DeltaTime);
+	void DoAnalyzeWithScreenshot(const FString& ScreenshotPath);
+	void OnAnalyzeRefineComplete(FString Refined);
 };

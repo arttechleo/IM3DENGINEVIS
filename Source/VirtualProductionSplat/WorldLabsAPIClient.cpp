@@ -57,6 +57,12 @@ void UWorldLabsAPIClient::Init()
 	}
 	GConfig->GetString(TEXT("WorldLabsAPI"), TEXT("APIKey"), APIKey, GGameIni);
 
+	{
+		FString AnthropicAPIKey;
+		GConfig->GetString(TEXT("AnthropicAPI"), TEXT("APIKey"), AnthropicAPIKey, GGameIni);
+		UE_LOG(LogVPSplat, Warning, TEXT("WorldLabsAPIClient::Init: Anthropic key length = %d"), AnthropicAPIKey.Len());
+	}
+
 	WorldsBaseURL = TEXT("https://api.worldlabs.ai/marble/v1");
 	FString ConfigBase;
 	GConfig->GetString(TEXT("WorldLabsAPI"), TEXT("WorldsBaseURL"), ConfigBase, GGameIni);
@@ -271,13 +277,21 @@ void UWorldLabsAPIClient::SubmitGenerationRequest(const FString& MediaAssetId)
 	ImagePrompt->SetBoolField(TEXT("is_pano"), true);
 
 	static const FString SystemInstruction = TEXT(
-		"CRITICAL: The input image contains white primitive 3D placeholder "
-		"shapes — cones, cylinders, boxes, spheres, flat platforms. "
-		"These are spatial layout markers ONLY. Do NOT reproduce them as "
-		"rocks, ruins, columns, or any physical object. Treat their "
-		"locations as open terrain or empty space. Generate a fully "
-		"photorealistic world that fills the space organically as if "
-		"the primitives were never there."
+		"CRITICAL: This 360 panorama contains white/grey primitive "
+		"placeholder shapes — cones, pyramids, cylinders, boxes, "
+		"spheres, and flat planes. These are spatial layout guides ONLY. "
+		"You MUST NOT reproduce any of these shapes in the output. "
+		"Do not turn them into rocks, ruins, columns, trees, or any "
+		"recognizable physical object that echoes their primitive form. "
+		"Replace each primitive's location with organic natural or "
+		"architectural environment that fits the chosen environment "
+		"preset and mood. The final world must look like it was "
+		"photographed in the real world with no trace of 3D primitives."
+	);
+	const FString NegativePrompt = TEXT(
+		"primitive shapes, white geometry, 3D placeholders, "
+		"cones, cylinders, boxes, spheres, grey surfaces, "
+		"unlit geometry, flat shading, CG render"
 	);
 	const FString FinalPrompt = PendingGenerationPrompt.IsEmpty()
 		? SystemInstruction
@@ -292,6 +306,7 @@ void UWorldLabsAPIClient::SubmitGenerationRequest(const FString& MediaAssetId)
 	Root->SetStringField(TEXT("display_name"), TEXT("VirtualProductionSplat"));
 	Root->SetStringField(TEXT("model"), PendingModelName);
 	Root->SetObjectField(TEXT("world_prompt"), WP);
+	Root->SetStringField(TEXT("negative_prompt"), NegativePrompt);
 
 	FString BodyStr;
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyStr);

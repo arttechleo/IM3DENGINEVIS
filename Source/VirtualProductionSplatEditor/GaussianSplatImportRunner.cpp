@@ -12,6 +12,7 @@
 #include "RHI.h"
 #include "ShaderCompiler.h"
 #include "Widgets/Notifications/SNotificationList.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 
 /**
  * Run ConvertSpzToPly.py with the given Python binary.
@@ -194,7 +195,11 @@ void AGaussianSplatImportRunner::ImportPLYIntoLevel()
 		return;
 	}
 
-	// ---- Step 5: Redraw all viewports so the splat appears immediately ----
+	// ---- Step 5: Scan asset registry so Content Browser reflects the new .ply ----
+	FAssetRegistryModule::GetRegistry().ScanPathsSynchronous(
+		TArray<FString>{ TEXT("/Game/GaussianSplats") }, true);
+
+	// ---- Step 6: Redraw all viewports so the splat appears immediately ----
 	if (GEditor)
 	{
 		GEditor->RedrawAllViewports(true);

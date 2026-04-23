@@ -1,7 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "WorldLabsPromptDialog.h"
+#include "ClaudePromptRefiner.h"
 #include "WorldLabsPromptHistoryStore.h"
+#include "HAL/PlatformApplicationMisc.h"
+#include "HAL/PlatformTime.h"
+#include "Widgets/Layout/SExpandableArea.h"
 #include "Editor.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Input/SButton.h"
@@ -21,10 +25,16 @@
 #include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Styling/AppStyle.h"
+#include "IDesktopPlatform.h"
+#include "DesktopPlatformModule.h"
+#include "UnrealClient.h"
+#include "Containers/Ticker.h"
+#include "HAL/FileManager.h"
 
 namespace WorldLabsPromptDialogInternal
 {
@@ -77,6 +87,7 @@ void SWorldLabsPromptDialog::Construct(const FArguments& InArgs)
 	SelectedModel = *SelectedModelItem;
 
 	LoadPromptHistory();
+	LastRefinedPrompt = FWorldLabsPromptHistoryStore::LoadLastRefinedPrompt();
 
 	ChildSlot
 	[
@@ -187,21 +198,60 @@ void SWorldLabsPromptDialog::Construct(const FArguments& InArgs)
 				.OnTextChanged(this, &SWorldLabsPromptDialog::OnNotesChanged)
 			]
 		]
-		+ SVerticalBox::Slot().FillHeight(0.38f).Padding(8.f, 4.f)
+		// Task 2: editable prompt preview
+		+ SVerticalBox::Slot().FillHeight(0.32f).Padding(8.f, 4.f)
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 4.f)
 			[
-				SNew(STextBlock).Text(NSLOCTEXT("WorldLabsPromptDialog", "PreviewLabel", "Generated Prompt Preview (read-only):"))
+				SNew(STextBlock).Text(NSLOCTEXT("WorldLabsPromptDialog", "PreviewLabel", "Generated Prompt Preview (editable — overrides auto-generated):"))
 			]
 			+ SVerticalBox::Slot().FillHeight(1.f)
 			[
 				SAssignNew(PreviewTextBox, SMultiLineEditableTextBox)
-				.IsReadOnly(true)
+				.IsReadOnly(false)
 				.AutoWrapText(true)
+				.OnTextChanged_Lambda([this](const FText& T)
+				{
+					// Only capture user edits (SetText doesn't fire this)
+					UserEditedPrompt = T.ToString();
+				})
 			]
 		]
-		+ SVerticalBox::Slot().FillHeight(0.28f).Padding(8.f, 4.f)
+		// Task 3: style reference images
+		+ SVerticalBox::Slot().AutoHeight().Padding(8.f, 2.f)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 2.f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(NSLOCTEXT("WorldLabsPromptDialog", "RefImagesLabel", "Style Reference Images (optional, max 3):"))
+				]
+				+ SHorizontalBox::Slot().AutoWidth()
+				[
+					SNew(SButton)
+					.Text(NSLOCTEXT("WorldLabsPromptDialog", "AddRefImage", "+ Add Image"))
+					.OnClicked(this, &SWorldLabsPromptDialog::OnAddRefImageClicked)
+					.IsEnabled_Lambda([this]() -> bool { return ReferenceImagePaths.Num() < MaxRefImages; })
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SBox)
+				.MaxDesiredHeight(72.f)
+				.Visibility(this, &SWorldLabsPromptDialog::GetRefImagesListVisibility)
+				[
+					SAssignNew(RefImagesListView, SListView<TSharedPtr<FString>>)
+					.ListItemsSource(&RefImagePathItems)
+					.OnGenerateRow(this, &SWorldLabsPromptDialog::OnGenerateRefImageRow)
+					.SelectionMode(ESelectionMode::None)
+				]
+			]
+		]
+		+ SVerticalBox::Slot().FillHeight(0.22f).Padding(8.f, 4.f)
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 4.f)
@@ -215,6 +265,33 @@ void SWorldLabsPromptDialog::Construct(const FArguments& InArgs)
 				.OnGenerateRow(this, &SWorldLabsPromptDialog::OnGenerateHistoryRow)
 				.SelectionMode(ESelectionMode::Single)
 				.OnSelectionChanged(this, &SWorldLabsPromptDialog::OnHistoryItemSelected)
+			]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(8.f, 4.f)
+		[
+			SNew(SExpandableArea)
+			.AreaTitle(NSLOCTEXT("WorldLabsPromptDialog", "RefinedPromptExpand", "AI-Refined Prompt (sent to WorldLabs)"))
+			.InitiallyCollapsed(false)
+			.BodyContent()
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 4.f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1.f)
+					[
+						SAssignNew(RefinedPromptTextBox, SMultiLineEditableTextBox)
+						.IsReadOnly(true)
+						.AutoWrapText(true)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(4.f, 0.f, 0.f, 0.f)
+					[
+						SNew(SButton)
+						.Text(NSLOCTEXT("WorldLabsPromptDialog", "CopyRefined", "Copy"))
+						.OnClicked(this, &SWorldLabsPromptDialog::OnCopyRefinedPromptClicked)
+						.Visibility(this, &SWorldLabsPromptDialog::GetRefinedPromptVisibility)
+					]
+				]
 			]
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(8.f)
@@ -246,6 +323,24 @@ void SWorldLabsPromptDialog::Construct(const FArguments& InArgs)
 	if (HistoryListView.IsValid())
 	{
 		HistoryListView->RequestListRefresh();
+	}
+	if (RefinedPromptTextBox.IsValid() && !LastRefinedPrompt.IsEmpty())
+	{
+		RefinedPromptTextBox->SetText(FText::FromString(LastRefinedPrompt));
+	}
+}
+
+SWorldLabsPromptDialog::~SWorldLabsPromptDialog()
+{
+	if (AnalyzeTickerHandle.IsValid())
+	{
+		FTicker::GetCoreTicker().RemoveTicker(AnalyzeTickerHandle);
+		AnalyzeTickerHandle.Reset();
+	}
+	if (AnalyzeRefiner)
+	{
+		AnalyzeRefiner->RemoveFromRoot();
+		AnalyzeRefiner = nullptr;
 	}
 }
 
@@ -319,7 +414,12 @@ void SWorldLabsPromptDialog::UpdatePromptPreview()
 
 	if (PreviewTextBox.IsValid())
 	{
-		PreviewTextBox->SetText(FText::FromString(EnteredPrompt));
+		// Programmatic SetText does NOT fire OnTextChanged, so UserEditedPrompt stays intact.
+		// Only update box if user hasn't manually overridden the prompt.
+		if (UserEditedPrompt.IsEmpty())
+		{
+			PreviewTextBox->SetText(FText::FromString(EnteredPrompt));
+		}
 	}
 }
 
@@ -351,6 +451,7 @@ void SWorldLabsPromptDialog::RestoreSelectionsFromHistory(const FWorldLabsPrompt
 		NotesTextBox->SetText(FText::FromString(AdditionalNotes));
 	}
 
+	UserEditedPrompt.Reset(); // clear any manual override so auto-preview refreshes
 	UpdatePromptPreview();
 }
 
@@ -447,14 +548,246 @@ void SWorldLabsPromptDialog::OnHistoryItemSelected(TSharedPtr<FWorldLabsPromptHi
 	}
 }
 
-FReply SWorldLabsPromptDialog::OnAnalyzeClicked()
+// ---- Task 3: Reference image helpers ----
+
+FReply SWorldLabsPromptDialog::OnAddRefImageClicked()
 {
-	AnalyzeSceneAndRefresh();
+	if (ReferenceImagePaths.Num() >= MaxRefImages)
+	{
+		return FReply::Handled();
+	}
+
+	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+	if (!DesktopPlatform)
+	{
+		return FReply::Handled();
+	}
+
+	const void* ParentWindowHandle = ParentWindow.IsValid()
+		? ParentWindow->GetNativeWindow()->GetOSWindowHandle()
+		: nullptr;
+
+	TArray<FString> OutFiles;
+	DesktopPlatform->OpenFileDialog(
+		ParentWindowHandle,
+		TEXT("Select Style Reference Image"),
+		FPaths::ProjectDir(),
+		TEXT(""),
+		TEXT("Image Files|*.png;*.jpg;*.jpeg;*.exr"),
+		EFileDialogFlags::None,
+		OutFiles);
+
+	for (const FString& F : OutFiles)
+	{
+		if (!ReferenceImagePaths.Contains(F) && ReferenceImagePaths.Num() < MaxRefImages)
+		{
+			ReferenceImagePaths.Add(F);
+			RefImagePathItems.Add(MakeShared<FString>(F));
+		}
+	}
+
+	if (RefImagesListView.IsValid())
+	{
+		RefImagesListView->RequestListRefresh();
+	}
+
 	return FReply::Handled();
 }
 
+void SWorldLabsPromptDialog::OnRemoveRefImage(TSharedPtr<FString> Item)
+{
+	if (Item.IsValid())
+	{
+		ReferenceImagePaths.Remove(*Item);
+		RefImagePathItems.Remove(Item);
+	}
+	if (RefImagesListView.IsValid())
+	{
+		RefImagesListView->RequestListRefresh();
+	}
+}
+
+TSharedRef<ITableRow> SWorldLabsPromptDialog::OnGenerateRefImageRow(
+	TSharedPtr<FString> Item,
+	const TSharedRef<STableViewBase>& OwnerTable)
+{
+	TWeakPtr<SWorldLabsPromptDialog> WeakThis(StaticCastSharedRef<SWorldLabsPromptDialog>(AsShared()));
+
+	return SNew(STableRow<TSharedPtr<FString>>, OwnerTable)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+		[
+			SNew(STextBlock)
+			.Text(Item.IsValid() ? FText::FromString(FPaths::GetCleanFilename(*Item)) : FText::GetEmpty())
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f, 0.f, 0.f)
+		[
+			SNew(SButton)
+			.Text(FText::FromString(TEXT("x")))
+			.OnClicked_Lambda([WeakThis, Item]() -> FReply
+			{
+				if (TSharedPtr<SWorldLabsPromptDialog> Pinned = WeakThis.Pin())
+				{
+					Pinned->OnRemoveRefImage(Item);
+				}
+				return FReply::Handled();
+			})
+		]
+	];
+}
+
+EVisibility SWorldLabsPromptDialog::GetRefImagesListVisibility() const
+{
+	return RefImagePathItems.Num() > 0 ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+// ---- Task 6: Analyze Scene with Claude ----
+
+FReply SWorldLabsPromptDialog::OnAnalyzeClicked()
+{
+	FString AnthropicKey;
+	if (GConfig)
+	{
+		GConfig->GetString(TEXT("AnthropicAPI"), TEXT("APIKey"), AnthropicKey, GGameIni);
+	}
+
+	if (AnthropicKey.IsEmpty() || AnthropicKey == TEXT("YOUR_KEY_HERE"))
+	{
+		// No key — fall back to local scene analysis only
+		AnalyzeSceneAndRefresh();
+		return FReply::Handled();
+	}
+
+	// Delete any stale capture so the file-presence check works reliably
+	AnalyzeScreenshotPath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("VP_Analyze_capture.png"));
+	if (FPaths::FileExists(AnalyzeScreenshotPath))
+	{
+		IFileManager::Get().Delete(*AnalyzeScreenshotPath, false, true);
+	}
+
+	FScreenshotRequest::RequestScreenshot(AnalyzeScreenshotPath, false, false);
+
+	AnalyzeTickStart = FPlatformTime::Seconds();
+
+	if (AnalyzeTickerHandle.IsValid())
+	{
+		FTicker::GetCoreTicker().RemoveTicker(AnalyzeTickerHandle);
+	}
+
+	TWeakPtr<SWorldLabsPromptDialog> WeakThis(StaticCastSharedRef<SWorldLabsPromptDialog>(AsShared()));
+	FString PathCopy = AnalyzeScreenshotPath;
+	double StartCopy = AnalyzeTickStart;
+
+	AnalyzeTickerHandle = FTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([WeakThis, PathCopy, StartCopy](float) -> bool
+		{
+			TSharedPtr<SWorldLabsPromptDialog> Pinned = WeakThis.Pin();
+			if (!Pinned.IsValid())
+			{
+				return false;
+			}
+			return Pinned->PollForAnalyzeScreenshot(0.f);
+		}), 0.15f);
+
+	return FReply::Handled();
+}
+
+bool SWorldLabsPromptDialog::PollForAnalyzeScreenshot(float /*DeltaTime*/)
+{
+	if (FPaths::FileExists(AnalyzeScreenshotPath))
+	{
+		AnalyzeTickerHandle.Reset();
+		DoAnalyzeWithScreenshot(AnalyzeScreenshotPath);
+		return false;
+	}
+
+	// 5s timeout — fall back to local analysis
+	if (FPlatformTime::Seconds() - AnalyzeTickStart > 5.0)
+	{
+		AnalyzeTickerHandle.Reset();
+		AnalyzeSceneAndRefresh();
+		return false;
+	}
+
+	return true;
+}
+
+void SWorldLabsPromptDialog::DoAnalyzeWithScreenshot(const FString& ScreenshotPath)
+{
+	FString AnthropicKey;
+	if (GConfig)
+	{
+		GConfig->GetString(TEXT("AnthropicAPI"), TEXT("APIKey"), AnthropicKey, GGameIni);
+	}
+
+	if (AnthropicKey.IsEmpty() || AnthropicKey == TEXT("YOUR_KEY_HERE"))
+	{
+		AnalyzeSceneAndRefresh();
+		return;
+	}
+
+	const FString UserIntent = FString::Printf(TEXT("%s environment, %s, %s mood"),
+		*SelectedEnvironment, *SelectedTimeOfDay, *SelectedMood);
+
+	if (!AnalyzeRefiner)
+	{
+		AnalyzeRefiner = NewObject<UClaudePromptRefiner>(GetTransientPackage());
+		AnalyzeRefiner->AddToRoot();
+	}
+
+	TWeakPtr<SWorldLabsPromptDialog> WeakThis(StaticCastSharedRef<SWorldLabsPromptDialog>(AsShared()));
+	UClaudePromptRefiner* RefinerRaw = AnalyzeRefiner;
+
+	TArray<FString> NoRefs;
+	AnalyzeRefiner->RefinePrompt(
+		AnthropicKey,
+		ScreenshotPath,
+		UserIntent,
+		NoRefs,
+		FOnRefinedPrompt::CreateLambda([WeakThis, RefinerRaw](FString Refined)
+		{
+			// Always clean up root reference
+			if (RefinerRaw)
+			{
+				RefinerRaw->RemoveFromRoot();
+			}
+
+			// Only update UI if dialog still alive
+			if (TSharedPtr<SWorldLabsPromptDialog> Pinned = WeakThis.Pin())
+			{
+				Pinned->AnalyzeRefiner = nullptr;
+				Pinned->OnAnalyzeRefineComplete(Refined);
+			}
+		}));
+}
+
+void SWorldLabsPromptDialog::OnAnalyzeRefineComplete(FString Refined)
+{
+	if (Refined.IsEmpty())
+	{
+		AnalyzeSceneAndRefresh();
+		return;
+	}
+
+	// Populate the editable prompt with Claude's response, do NOT submit
+	UserEditedPrompt = Refined;
+	EnteredPrompt = Refined;
+	if (PreviewTextBox.IsValid())
+	{
+		PreviewTextBox->SetText(FText::FromString(Refined));
+	}
+}
+
+// ---- Submit / Cancel ----
+
 FReply SWorldLabsPromptDialog::OnSubmitClicked()
 {
+	// Use user-edited prompt if provided, otherwise keep auto-generated EnteredPrompt
+	if (!UserEditedPrompt.IsEmpty())
+	{
+		EnteredPrompt = UserEditedPrompt;
+	}
 	SavePromptToHistory();
 	bSubmitted = true;
 	if (ParentWindow.IsValid())
@@ -503,4 +836,18 @@ FText SWorldLabsPromptDialog::GetMoodLabel() const
 FText SWorldLabsPromptDialog::GetModelLabel() const
 {
 	return SelectedModelItem.IsValid() ? FText::FromString(*SelectedModelItem) : FText::FromString(SelectedModel);
+}
+
+FReply SWorldLabsPromptDialog::OnCopyRefinedPromptClicked()
+{
+	if (!LastRefinedPrompt.IsEmpty())
+	{
+		FPlatformApplicationMisc::ClipboardCopy(*LastRefinedPrompt);
+	}
+	return FReply::Handled();
+}
+
+EVisibility SWorldLabsPromptDialog::GetRefinedPromptVisibility() const
+{
+	return LastRefinedPrompt.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
 }
