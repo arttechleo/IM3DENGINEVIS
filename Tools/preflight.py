@@ -293,6 +293,27 @@ def check_git_status_clean():
         record(WARN, "GitStatus_Clean", f"git check failed: {e}")
 
 
+def check_unrealclaude_submodule():
+    try:
+        out = subprocess.check_output(
+            ["git", "submodule", "status", "Plugins/UnrealClaude"],
+            cwd=str(PROJECT_ROOT), text=True, stderr=subprocess.STDOUT
+        ).strip()
+        if not out:
+            record(FAIL, "UnrealClaude_Submodule", "no output — submodule entry missing from .gitmodules")
+            return
+        first_char = out[0]
+        if first_char == "-":
+            record(FAIL, "UnrealClaude_Submodule",
+                   "not initialized — run: git submodule update --init --recursive")
+        else:
+            record(PASS, "UnrealClaude_Submodule", out[:72])
+    except subprocess.CalledProcessError as e:
+        record(FAIL, "UnrealClaude_Submodule", f"git submodule status failed: {e.output.strip()[:120]}")
+    except Exception as e:
+        record(WARN, "UnrealClaude_Submodule", f"check failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # RUN ALL CHECKS
 # ---------------------------------------------------------------------------
@@ -314,6 +335,7 @@ check_numpy_importable()
 check_ddc_size()
 check_no_nested_git()
 check_git_status_clean()
+check_unrealclaude_submodule()
 
 # ---------------------------------------------------------------------------
 # PRINT SUMMARY
