@@ -115,7 +115,8 @@ def check_mlslabs_binaries():
 
 
 def check_unrealclaude_uplugin():
-    uplugin = PROJECT_ROOT / "Plugins/UnrealClaude/UnrealClaude.uplugin"
+    # Submodule repo has nested structure: Plugins/UnrealClaude/<repo>/UnrealClaude/<plugin>.
+    uplugin = PROJECT_ROOT / "Plugins/UnrealClaude/UnrealClaude/UnrealClaude.uplugin"
     if not uplugin.exists():
         record(WARN, "UnrealClaude_Uplugin", f"not found: {uplugin}")
         return
