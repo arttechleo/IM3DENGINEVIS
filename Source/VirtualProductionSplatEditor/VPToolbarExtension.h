@@ -16,6 +16,8 @@ private:
 	static void OnSubmitToWorldLabs();
 	static void OnImportLatestSplat();
 	static void OnOpenWorldPreview();
+	static void OnVerifyMLSLabs();
+	static void FillVirtualProductionSplatSubMenu(class UToolMenu* Menu);
 
 	static FDelegateHandle MenuStartupHandle;
 };

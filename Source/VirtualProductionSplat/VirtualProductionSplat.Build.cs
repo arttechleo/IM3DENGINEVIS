@@ -27,12 +27,18 @@ public class VirtualProductionSplat : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"RenderCore",
-			"RHI"
+			"RHI",
+			"Projects"
 		});
 
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.Add("UnrealEd");
+			PrivateDependencyModuleNames.AddRange(new string[]
+			{
+				"UnrealEd",
+				"Slate",
+				"SlateCore"
+			});
 		}
 	}
 }

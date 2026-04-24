@@ -14,8 +14,11 @@ class UWorld;
  * These helpers locate AGaussianSplattingActor / UGaussianSplattingComponent via reflection
  * and drive loading using documented property "SplatDataPath" + QueueLoadSplatData().
  */
-struct FMLSGaussianSplatInterop
+struct VIRTUALPRODUCTIONSPLAT_API FMLSGaussianSplatInterop
 {
+	/** Win64: ensure plugin is enabled and MLSLabsRenderer runtime module loaded. Logs + optional editor toast on failure. */
+	static bool EnsureMLSLabsRendererReady(FString& OutError);
+
 	static UClass* GetGaussianSplattingActorClass();
 	static UClass* GetGaussianSplattingComponentClass();
 

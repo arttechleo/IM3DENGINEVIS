@@ -18,6 +18,18 @@ Content/GaussianSplats/*.ply
 Content/GaussianSplats/*.spz
 Config/DefaultGame.ini
 
+# MLSLabsRenderer large binaries (download via install_deps.py / Fab plugin)
+Plugins/MLSLabsRenderer/Source/ThirdParty/libTorch/lib/torch_cpu.dll
+Plugins/MLSLabsRenderer/Source/ThirdParty/libTorch/lib/torch_cuda.dll
+Plugins/MLSLabsRenderer/Source/ThirdParty/libTorch/lib/cublas64_12.dll
+Plugins/MLSLabsRenderer/Source/ThirdParty/libTorch/lib/cublasLt64_12.dll
+Plugins/MLSLabsRenderer/Source/ThirdParty/libTorch/lib/cufft64_11.dll
+Plugins/MLSLabsRenderer/Source/ThirdParty/libTorch/lib/cusolver64_11.dll
+Plugins/MLSLabsRenderer/Source/ThirdParty/libTorch/lib/cusparse64_12.dll
+Plugins/MLSLabsRenderer/Source/ThirdParty/libTorch/lib/nvJitLink_120_0.dll
+Plugins/MLSLabsRenderer/Source/ThirdParty/GaussianSplatingRenderer/Bin/Win64/GaussianSplatingRenderer.dll
+Saved/libtorch_tmp.zip
+
 # Editor / OS (keep small noise out of repo)
 .idea/
 *.sln.DotSettings.user

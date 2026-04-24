@@ -4,4 +4,8 @@
 
 #include "CoreMinimal.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogVPSplat, Log, All);
+struct VIRTUALPRODUCTIONSPLAT_API FLogCategoryLogVPSplat : public FLogCategory<ELogVerbosity::Log, ELogVerbosity::All>
+{
+	UE_FORCEINLINE_HINT FLogCategoryLogVPSplat() : FLogCategory(TEXT("LogVPSplat")) {}
+};
+extern VIRTUALPRODUCTIONSPLAT_API FLogCategoryLogVPSplat LogVPSplat;

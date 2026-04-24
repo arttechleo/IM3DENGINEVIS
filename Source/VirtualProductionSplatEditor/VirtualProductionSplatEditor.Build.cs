@@ -19,6 +19,7 @@ public class VirtualProductionSplatEditor : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
+			"Projects",
 			"InputCore",
 			"ApplicationCore",
 			"UnrealEd",

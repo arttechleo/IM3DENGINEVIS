@@ -3,7 +3,7 @@
 #include "VirtualProductionSplat.h"
 #include "Modules/ModuleManager.h"
 
-DEFINE_LOG_CATEGORY(LogVPSplat);
+VIRTUALPRODUCTIONSPLAT_API FLogCategoryLogVPSplat LogVPSplat;
 
 IMPLEMENT_PRIMARY_GAME_MODULE(FDefaultGameModuleImpl, VirtualProductionSplat, "VirtualProductionSplat");
 

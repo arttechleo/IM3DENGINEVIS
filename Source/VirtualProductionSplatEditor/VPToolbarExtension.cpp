@@ -16,6 +16,7 @@
 #include "ToolMenus.h"
 #include "Widgets/SWindow.h"
 #include "GaussianSplatImportRunner.h"
+#include "MLSLabsEditorVerification.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "EngineUtils.h"
@@ -242,6 +243,28 @@ void FVPToolbarExtension::OnImportLatestSplat()
 	FSlateNotificationManager::Get().AddNotification(Info);
 }
 
+void FVPToolbarExtension::OnVerifyMLSLabs()
+{
+	FMLSLabsEditorVerification::LogFullReport();
+}
+
+void FVPToolbarExtension::FillVirtualProductionSplatSubMenu(UToolMenu* Menu)
+{
+	if (!Menu)
+	{
+		return;
+	}
+	FToolMenuSection& Sec = Menu->AddSection(
+		TEXT("VPSplat_MLSLabs"),
+		NSLOCTEXT("VPToolbarExtension", "VPSplatMLSSection", "MLSLabs"));
+	Sec.AddEntry(FToolMenuEntry::InitMenuEntry(
+		TEXT("VPSplat_VerifyMLS"),
+		NSLOCTEXT("VPToolbarExtension", "VerifyMLS", "Verify MLSLabs"),
+		NSLOCTEXT("VPToolbarExtension", "VerifyMLSTT", "Run MLSLabsRenderer self-check; results in Output Log (LogVPSplat)."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tools"),
+		FUIAction(FExecuteAction::CreateStatic(&FVPToolbarExtension::OnVerifyMLSLabs))));
+}
+
 void FVPToolbarExtension::OnOpenWorldPreview()
 {
 	if (!GEditor)
@@ -321,6 +344,17 @@ void FVPToolbarExtension::Register()
 			NSLOCTEXT("VPToolbarExtension", "OpenWorldPreviewTooltip", "Open the generated world in the WorldLabs browser preview (available after job completes)."),
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.OpenLevel"),
 			FUIAction(FExecuteAction::CreateStatic(&FVPToolbarExtension::OnOpenWorldPreview))));
+
+		FToolMenuSection& VpSection = Menu->AddSection(
+			TEXT("VirtualProductionSplatRoot"),
+			NSLOCTEXT("VPToolbarExtension", "VPRootSection", "VirtualProductionSplat"));
+		VpSection.AddSubMenu(
+			TEXT("VPSplat_Sub"),
+			NSLOCTEXT("VPToolbarExtension", "VPSplatSub", "VirtualProductionSplat"),
+			NSLOCTEXT("VPToolbarExtension", "VPSplatSubTT", "Diagnostics and MLSLabs utilities."),
+			FNewToolMenuDelegate::CreateStatic(&FVPToolbarExtension::FillVirtualProductionSplatSubMenu),
+			false,
+			FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tools"));
 	}));
 }
 

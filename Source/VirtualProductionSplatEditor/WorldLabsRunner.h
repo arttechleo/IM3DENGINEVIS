@@ -7,6 +7,7 @@
 #include "WorldLabsRunner.generated.h"
 
 class UWorldLabsAPIClient;
+class UClaudePromptRefiner;
 class SNotificationItem;
 
 UCLASS(Blueprintable, BlueprintType, placeable)
@@ -31,6 +32,18 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "WorldLabs")
 	bool bAutoImportOnComplete = true;
+
+	UPROPERTY(EditAnywhere, Category = "WorldLabs|ClaudeRefinement")
+	bool bUseClaudeRefinement = true;
+
+	UPROPERTY(EditAnywhere, Category = "WorldLabs|ClaudeRefinement")
+	TArray<FString> StyleReferenceImagePaths;
+
+	UPROPERTY(VisibleAnywhere, Category = "WorldLabs|ClaudeRefinement")
+	FString RefinedPrompt;
+
+	UFUNCTION(CallInEditor, Category = "WorldLabs|ClaudeRefinement")
+	void CopyRefinedPromptToClipboard();
 
 	UFUNCTION(CallInEditor, Category = "WorldLabs")
 	void SubmitToWorldLabs();
@@ -63,7 +76,15 @@ private:
 	UPROPERTY()
 	TObjectPtr<UWorldLabsAPIClient> APIClient;
 
+	UPROPERTY()
+	TObjectPtr<UClaudePromptRefiner> PromptRefiner;
+
+	FString PendingPanoramaPath;
+
 	void EnsureApiClient();
+	void EnsurePromptRefiner();
+	void OnRefinedPrompt(FString Refined);
+	void DoSubmitWithPrompt(const FString& Prompt);
 
 	void HandleSplatDownloaded(FString SavePath);
 	void AutoImportSplat(const FString& DownloadedSPZPath);

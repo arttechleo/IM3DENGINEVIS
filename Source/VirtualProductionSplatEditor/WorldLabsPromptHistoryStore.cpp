@@ -110,3 +110,20 @@ void FWorldLabsPromptHistoryStore::UpdateLatestWorldFields(const FString& WorldI
 
 	SaveHistoryArray(Arr);
 }
+
+FString FWorldLabsPromptHistoryStore::GetLastRefinedPromptFilePath()
+{
+	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("LastRefinedPrompt.txt"));
+}
+
+void FWorldLabsPromptHistoryStore::SaveLastRefinedPrompt(const FString& Prompt)
+{
+	FFileHelper::SaveStringToFile(Prompt, *GetLastRefinedPromptFilePath());
+}
+
+FString FWorldLabsPromptHistoryStore::LoadLastRefinedPrompt()
+{
+	FString Prompt;
+	FFileHelper::LoadFileToString(Prompt, *GetLastRefinedPromptFilePath());
+	return Prompt;
+}

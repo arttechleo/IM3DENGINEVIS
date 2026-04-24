@@ -2,6 +2,7 @@
 
 #include "GaussianSplatImportRunner.h"
 #include "GaussianSplatImportHelper.h"
+#include "MLSGaussianSplatInterop.h"
 #include "Editor.h"
 #include "EngineUtils.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -132,6 +133,32 @@ void AGaussianSplatImportRunner::ImportPLYIntoLevel()
 	{
 		UE_LOG(LogTemp, Error, TEXT("GaussianSplatImportRunner: PLY not found: %s"), *ResolvedPlyPath);
 		PostImportToast(FString::Printf(TEXT("Splat import failed: file not found\n%s"), *ResolvedPlyPath), false);
+		return;
+	}
+
+	const int64 PlyBytes = IFileManager::Get().FileSize(*ResolvedPlyPath);
+	if (PlyBytes <= 0)
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("GaussianSplatImportRunner: PLY missing or empty (size=%lld): %s"),
+			static_cast<long long>(PlyBytes), *ResolvedPlyPath);
+		PostImportToast(TEXT("Splat import failed: PLY file is empty or unreadable"), false);
+		return;
+	}
+
+	const FString PlyDir = FPaths::GetPath(ResolvedPlyPath);
+	if (!FPaths::DirectoryExists(PlyDir))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GaussianSplatImportRunner: PLY parent directory missing: %s"), *PlyDir);
+		PostImportToast(TEXT("Splat import failed: invalid PLY path"), false);
+		return;
+	}
+
+	FString ModuleErr;
+	if (!FMLSGaussianSplatInterop::EnsureMLSLabsRendererReady(ModuleErr))
+	{
+		UE_LOG(LogTemp, Error, TEXT("GaussianSplatImportRunner: MLSLabsRenderer not ready: %s"), *ModuleErr);
+		PostImportToast(FString::Printf(TEXT("Splat import aborted: %s"), *ModuleErr), false);
 		return;
 	}
 

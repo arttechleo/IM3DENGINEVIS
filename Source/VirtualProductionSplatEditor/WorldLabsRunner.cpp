@@ -3,11 +3,14 @@
 #include "WorldLabsRunner.h"
 #include "WorldLabsAPIClient.h"
 #include "WorldLabsPromptHistoryStore.h"
+#include "ClaudePromptRefiner.h"
 #include "MultiAngleCameraRig.h"
 #include "GaussianSplatImportRunner.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Misc/Paths.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -79,6 +82,44 @@ void AWorldLabsRunner::EnsureApiClient()
 	APIClient->OnWorldFailed.BindUObject(this, &AWorldLabsRunner::HandleWorldFailed);
 	APIClient->OnPollTick.BindUObject(this, &AWorldLabsRunner::HandlePollTick);
 	APIClient->OnSplatDownloaded.BindUObject(this, &AWorldLabsRunner::HandleSplatDownloaded);
+}
+
+void AWorldLabsRunner::EnsurePromptRefiner()
+{
+	if (!PromptRefiner)
+	{
+		PromptRefiner = NewObject<UClaudePromptRefiner>(this);
+	}
+}
+
+void AWorldLabsRunner::OnRefinedPrompt(FString Refined)
+{
+	if (Refined.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("WorldLabsRunner: Claude refinement empty — using original prompt."));
+		DoSubmitWithPrompt(WorldPrompt);
+		return;
+	}
+	RefinedPrompt = Refined;
+	FWorldLabsPromptHistoryStore::SaveLastRefinedPrompt(RefinedPrompt);
+	UE_LOG(LogTemp, Log, TEXT("WorldLabsRunner: Claude refined prompt (%d chars)."), Refined.Len());
+	DoSubmitWithPrompt(RefinedPrompt);
+}
+
+void AWorldLabsRunner::DoSubmitWithPrompt(const FString& Prompt)
+{
+	PollStartSeconds = FPlatformTime::Seconds();
+	PostOrUpdateNotification(TEXT("Generating world..."));
+	APIClient->SubmitWorldGeneration(PendingPanoramaPath, Prompt, ModelName);
+}
+
+void AWorldLabsRunner::CopyRefinedPromptToClipboard()
+{
+	if (!RefinedPrompt.IsEmpty())
+	{
+		FPlatformApplicationMisc::ClipboardCopy(*RefinedPrompt);
+		UE_LOG(LogTemp, Log, TEXT("WorldLabsRunner: refined prompt copied to clipboard (%d chars)."), RefinedPrompt.Len());
+	}
 }
 
 void AWorldLabsRunner::SubmitToWorldLabs()
@@ -166,9 +207,33 @@ void AWorldLabsRunner::SubmitToWorldLabs()
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("WorldLabsRunner: submitting panorama to WorldLabs."));
+	UE_LOG(LogTemp, Log, TEXT("WorldLabsRunner: panorama ready — %s"), *PanoramaPath);
+	PendingPanoramaPath = PanoramaPath;
+
+	if (bUseClaudeRefinement)
+	{
+		FString AnthropicKey;
+		if (GConfig)
+		{
+			GConfig->GetString(TEXT("AnthropicAPI"), TEXT("APIKey"), AnthropicKey, GGameIni);
+		}
+		if (!AnthropicKey.IsEmpty() && AnthropicKey != TEXT("YOUR_KEY_HERE"))
+		{
+			EnsurePromptRefiner();
+			PostOrUpdateNotification(TEXT("Refining prompt..."));
+			PromptRefiner->RefinePrompt(
+				AnthropicKey,
+				PanoramaPath,
+				WorldPrompt,
+				StyleReferenceImagePaths,
+				FOnRefinedPrompt::CreateUObject(this, &AWorldLabsRunner::OnRefinedPrompt));
+			return;
+		}
+		UE_LOG(LogTemp, Warning, TEXT("WorldLabsRunner: AnthropicAPI key not set — skipping Claude refinement."));
+	}
+
 	PollStartSeconds = FPlatformTime::Seconds();
-	PostOrUpdateNotification(TEXT("WorldLabs: uploading panorama…"));
+	PostOrUpdateNotification(TEXT("Generating world..."));
 	APIClient->SubmitWorldGeneration(PanoramaPath, WorldPrompt, ModelName);
 }
 
@@ -214,7 +279,7 @@ void AWorldLabsRunner::HandleWorldReady(FString PLYDownloadURL)
 			LastWorldPreviewURL = FString::Printf(TEXT("https://marble.worldlabs.ai/world/%s"), *APIClient->LastWorldId);
 		}
 	}
-	PostOrUpdateNotification(TEXT("WorldLabs: download started…"));
+	PostOrUpdateNotification(TEXT("Downloading splat..."));
 	UE_LOG(LogTemp, Log, TEXT("WorldLabsRunner: splat URL resolved. PreviewURL=%s"), *LastWorldPreviewURL);
 }
 
@@ -229,7 +294,7 @@ void AWorldLabsRunner::HandlePollTick(FString OperationID, FString Status)
 	CurrentOperationID = OperationID;
 	CurrentStatus = Status;
 	const int32 Elapsed = FMath::FloorToInt(static_cast<float>(FPlatformTime::Seconds() - PollStartSeconds));
-	PostOrUpdateNotification(FString::Printf(TEXT("WorldLabs: generating world… (%ds elapsed)"), Elapsed));
+	PostOrUpdateNotification(FString::Printf(TEXT("Generating world... (%ds elapsed)"), Elapsed));
 	UE_LOG(LogTemp, Log, TEXT("WorldLabsRunner: poll — operation %s status %s"), *OperationID, *Status);
 }
 
@@ -237,7 +302,7 @@ void AWorldLabsRunner::HandleSplatDownloaded(FString SavePath)
 {
 	DownloadedSplatPath = SavePath;
 	UE_LOG(LogTemp, Log, TEXT("WorldLabsRunner: SPZ downloaded to %s"), *DownloadedSplatPath);
-	PostOrUpdateNotification(TEXT("WorldLabs: converting SPZ → PLY…"));
+	PostOrUpdateNotification(TEXT("Importing splat..."));
 
 	if (bAutoImportOnComplete)
 	{
@@ -284,7 +349,7 @@ void AWorldLabsRunner::AutoImportSplat(const FString& DownloadedSPZPath)
 	if (Runner->LastSpawnedSplat)
 	{
 		UE_LOG(LogTemp, Log, TEXT("WorldLabsRunner: AutoImportSplat succeeded: %s"), *Runner->LastSpawnedSplat->GetName());
-		PostOrUpdateNotification(TEXT("WorldLabs: splat imported into level"), true, false);
+		PostOrUpdateNotification(TEXT("Ready."), true, false);
 		return;
 	}
 

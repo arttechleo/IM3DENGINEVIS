@@ -11,6 +11,76 @@
 #include "UObject/UObjectGlobals.h"
 
 #if PLATFORM_WINDOWS
+#include "Interfaces/IPluginManager.h"
+#include "Modules/ModuleManager.h"
+#endif
+
+#if PLATFORM_WINDOWS && WITH_EDITOR
+#include "Framework/Application/SlateApplication.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "Widgets/Notifications/SNotificationList.h"
+
+static void MLSLabsInteropEditorNotify(const FString& Msg)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return;
+	}
+	FNotificationInfo Info(FText::FromString(Msg));
+	Info.ExpireDuration = 8.0f;
+	Info.bFireAndForget = true;
+	FSlateNotificationManager::Get().AddNotification(Info);
+}
+#endif
+
+bool FMLSGaussianSplatInterop::EnsureMLSLabsRendererReady(FString& OutError)
+{
+#if !PLATFORM_WINDOWS
+	OutError = TEXT("MLSLabsRenderer is Win64-only.");
+	return false;
+#else
+	TSharedPtr<IPlugin> Plug = IPluginManager::Get().FindPlugin(TEXT("MLSLabsRenderer"));
+	if (!Plug.IsValid())
+	{
+		OutError = TEXT("MLSLabsRenderer plugin not registered (missing Plugins/MLSLabsRenderer or .uplugin).");
+		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
+#if WITH_EDITOR
+		MLSLabsInteropEditorNotify(OutError);
+#endif
+		return false;
+	}
+	if (!Plug->IsEnabled())
+	{
+		OutError = TEXT("MLSLabsRenderer plugin is disabled in .uproject or Plugins browser.");
+		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
+#if WITH_EDITOR
+		MLSLabsInteropEditorNotify(OutError);
+#endif
+		return false;
+	}
+
+	FModuleManager& MM = FModuleManager::Get();
+	const FName ModName(TEXT("MLSLabsRenderer"));
+	if (MM.IsModuleLoaded(ModName))
+	{
+		return true;
+	}
+
+	IModuleInterface* Loaded = MM.LoadModule(ModName);
+	if (!Loaded)
+	{
+		OutError = TEXT("LoadModule(MLSLabsRenderer) failed - see Tools/MLSLABS_SURVIVAL_README.md and run Tools/fix_mlslabs.bat.");
+		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
+#if WITH_EDITOR
+		MLSLabsInteropEditorNotify(OutError);
+#endif
+		return false;
+	}
+	return true;
+#endif
+}
+
+#if PLATFORM_WINDOWS
 
 static bool SetStringPropertyIfPresent(UActorComponent* Comp, FName PropName, const FString& Value)
 {
@@ -32,6 +102,11 @@ static bool SetStringPropertyIfPresent(UActorComponent* Comp, FName PropName, co
 
 UClass* FMLSGaussianSplatInterop::GetGaussianSplattingActorClass()
 {
+	FString Err;
+	if (!EnsureMLSLabsRendererReady(Err))
+	{
+		return nullptr;
+	}
 	if (UClass* Found = FindObject<UClass>(nullptr, TEXT("/Script/MLSLabsRenderer.GaussianSplattingActor")))
 	{
 		return Found;
@@ -41,6 +116,11 @@ UClass* FMLSGaussianSplatInterop::GetGaussianSplattingActorClass()
 
 UClass* FMLSGaussianSplatInterop::GetGaussianSplattingComponentClass()
 {
+	FString Err;
+	if (!EnsureMLSLabsRendererReady(Err))
+	{
+		return nullptr;
+	}
 	if (UClass* Found = FindObject<UClass>(nullptr, TEXT("/Script/MLSLabsRenderer.GaussianSplattingComponent")))
 	{
 		return Found;
