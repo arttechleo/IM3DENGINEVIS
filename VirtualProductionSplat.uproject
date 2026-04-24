@@ -60,15 +60,15 @@
 			"Enabled": true
 		},
 		{
+			"Name": "SplatRenderer",
+			"Enabled": false
+		},
+		{
 			"Name": "MLSLabsRenderer",
 			"Enabled": true,
 			"SupportedTargetPlatforms": [
 				"Win64"
 			]
-		},
-		{
-			"Name": "SplatRenderer",
-			"Enabled": false
 		},
 		{
 			"Name": "UnrealClaude",

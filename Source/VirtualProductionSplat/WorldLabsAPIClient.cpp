@@ -277,21 +277,28 @@ void UWorldLabsAPIClient::SubmitGenerationRequest(const FString& MediaAssetId)
 	ImagePrompt->SetBoolField(TEXT("is_pano"), true);
 
 	static const FString SystemInstruction = TEXT(
-		"CRITICAL: This 360 panorama contains white/grey primitive "
-		"placeholder shapes — cones, pyramids, cylinders, boxes, "
-		"spheres, and flat planes. These are spatial layout guides ONLY. "
-		"You MUST NOT reproduce any of these shapes in the output. "
-		"Do not turn them into rocks, ruins, columns, trees, or any "
-		"recognizable physical object that echoes their primitive form. "
-		"Replace each primitive's location with organic natural or "
-		"architectural environment that fits the chosen environment "
-		"preset and mood. The final world must look like it was "
-		"photographed in the real world with no trace of 3D primitives."
+		"ABSOLUTE RULE: The input panorama contains white and grey "
+		"untextured primitive 3D shapes used ONLY as spatial position "
+		"markers. These include: white cones, white pyramids, white "
+		"cylinders, white boxes, white spheres, grey flat ground planes, "
+		"and any unlit untextured geometry. "
+		"YOU MUST NOT include ANY of these shapes or their visual "
+		"characteristics in the generated world output. "
+		"Do not reinterpret them as rocks, ruins, columns, mountains, "
+		"trees, buildings, or any real-world object that echoes their "
+		"primitive silhouette. "
+		"Treat every primitive location as open air, natural terrain, "
+		"or empty space to be filled organically by the environment. "
+		"The generated world must be 100 percent photorealistic with "
+		"zero trace of 3D primitive geometry, white surfaces, grey "
+		"untextured materials, or CG placeholder objects."
 	);
 	const FString NegativePrompt = TEXT(
-		"primitive shapes, white geometry, 3D placeholders, "
-		"cones, cylinders, boxes, spheres, grey surfaces, "
-		"unlit geometry, flat shading, CG render"
+		"white primitive shapes, grey geometry, untextured surfaces, "
+		"3D placeholders, cones, cylinders, boxes, spheres, "
+		"flat ground plane, CG render, unlit materials, "
+		"white objects, grey objects, placeholder geometry, "
+		"primitive silhouettes, unreal engine primitives"
 	);
 	const FString FinalPrompt = PendingGenerationPrompt.IsEmpty()
 		? SystemInstruction

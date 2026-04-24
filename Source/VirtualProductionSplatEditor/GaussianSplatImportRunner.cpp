@@ -113,8 +113,13 @@ void AGaussianSplatImportRunner::ImportPLYIntoLevel()
 			else
 			{
 				UE_LOG(LogTemp, Error,
-					TEXT("GaussianSplatImportRunner: SPZ→PLY conversion failed.\n%s"), *ConvLog);
-				PostImportToast(TEXT("Splat import failed: SPZ→PLY conversion error — check Output Log"), false);
+					TEXT("GaussianSplatImportRunner: SPZ->PLY conversion FAILED.\n%s"), *ConvLog);
+
+				FNotificationInfo Info(FText::FromString(
+					TEXT("SPZ→PLY conversion failed — check Output Log")));
+				Info.bFireAndForget = true;
+				Info.ExpireDuration = 6.0f;
+				FSlateNotificationManager::Get().AddNotification(Info);
 				return;
 			}
 		}
