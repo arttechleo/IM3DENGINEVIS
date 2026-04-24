@@ -98,10 +98,12 @@ def check_mlslabs_uplugin():
 
 
 def check_mlslabs_torch_dll():
-    dll = PROJECT_ROOT / "Plugins/MLSLabsRenderer/Source/ThirdParty/libTorch/lib/torch_cuda.dll"
-    if not dll.exists():
+    lib_dir = PROJECT_ROOT / "Plugins/MLSLabsRenderer/Source/ThirdParty/libTorch/lib"
+    required = ["torch_cuda.dll", "c10.dll", "asmjit.dll"]
+    missing = [name for name in required if not (lib_dir / name).exists()]
+    if missing:
         record(FAIL, "MLSLabsRenderer_TorchDLL",
-               f"torch_cuda.dll missing — git filter-repo may have wiped ThirdParty DLLs")
+               f"torch DLLs missing ({', '.join(missing)}) — run Tools/fix_mlslabs.bat")
     else:
         record(PASS, "MLSLabsRenderer_TorchDLL")
 
