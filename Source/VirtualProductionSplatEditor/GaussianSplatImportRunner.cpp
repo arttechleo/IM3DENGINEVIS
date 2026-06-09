@@ -14,6 +14,14 @@
 #include "ShaderCompiler.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "UObject/Package.h"
+
+// NanoGS plugin API
+#include "GaussianSplatAsset.h"
+
+#if WITH_EDITOR
+#include "GaussianSplatAssetFactory.h"   // NanoGSEditor: imports .ply -> UGaussianSplatAsset
+#endif
 
 /**
  * Run ConvertSpzToPly.py with the given Python binary.
@@ -42,6 +50,43 @@ static bool TryConvertSpzToPly(
 
 	return bOk && ReturnCode == 0 && FPaths::FileExists(PlyOutPath);
 }
+
+#if WITH_EDITOR
+/**
+ * Import a .ply into a persistent UGaussianSplatAsset under /Game/GaussianSplats via the
+ * NanoGS editor factory, so it shows up in the Content Browser. Returns nullptr (OutError set) on failure.
+ */
+static UGaussianSplatAsset* ImportPlyViaFactory(const FString& PlyPath, FString& OutError)
+{
+	const FString BaseName = FPaths::GetBaseFilename(PlyPath);
+	const FString PackageName = FString::Printf(TEXT("/Game/GaussianSplats/%s"), *BaseName);
+
+	UPackage* Package = CreatePackage(*PackageName);
+	if (!Package)
+	{
+		OutError = TEXT("CreatePackage failed for /Game/GaussianSplats.");
+		return nullptr;
+	}
+	Package->FullyLoad();
+
+	UGaussianSplatAssetFactory* Factory = NewObject<UGaussianSplatAssetFactory>();
+	bool bCanceled = false;
+	UObject* Created = Factory->FactoryCreateFile(
+		UGaussianSplatAsset::StaticClass(), Package, FName(*BaseName),
+		RF_Public | RF_Standalone, PlyPath, nullptr, GWarn, bCanceled);
+
+	UGaussianSplatAsset* Asset = Cast<UGaussianSplatAsset>(Created);
+	if (!Asset)
+	{
+		OutError = bCanceled ? TEXT("PLY import canceled.") : TEXT("UGaussianSplatAssetFactory returned no asset.");
+		return nullptr;
+	}
+
+	FAssetRegistryModule::AssetCreated(Asset);
+	Package->MarkPackageDirty();
+	return Asset;
+}
+#endif // WITH_EDITOR
 
 AGaussianSplatImportRunner::AGaussianSplatImportRunner()
 {
@@ -154,10 +199,43 @@ void AGaussianSplatImportRunner::ImportPLYIntoLevel()
 		return;
 	}
 
+	// Guard 1: minimum sensible PLY size (reuse PlyBytes already computed above)
+	if (PlyBytes < 1024)
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("ImportPLY: file too small (%lld bytes), likely corrupt: %s"),
+			PlyBytes, *ResolvedPlyPath);
+		PostImportToast(TEXT("Import failed — PLY file corrupt or empty"), false);
+		return;
+	}
+
+	// Guard 2: verify PLY magic bytes
+	{
+		uint8 MagicBytes[4] = { 0, 0, 0, 0 };
+		if (FArchive* Ar = IFileManager::Get().CreateFileReader(*ResolvedPlyPath))
+		{
+			Ar->Serialize(MagicBytes, 3);
+			delete Ar;
+		}
+		if (MagicBytes[0] != 'p' || MagicBytes[1] != 'l' || MagicBytes[2] != 'y')
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("ImportPLY: not a valid PLY file (bad magic): %s"),
+				*ResolvedPlyPath);
+			PostImportToast(TEXT("Import failed — not a valid PLY"), false);
+			return;
+		}
+	}
+
+	// Guard 3: all guards passed
+	UE_LOG(LogTemp, Warning,
+		TEXT("ImportPLY: guards passed. Size=%lld bytes. Building NanoGS asset."),
+		PlyBytes);
+
 	FString ModuleErr;
 	if (!FMLSGaussianSplatInterop::EnsureMLSLabsRendererReady(ModuleErr))
 	{
-		UE_LOG(LogTemp, Error, TEXT("GaussianSplatImportRunner: MLSLabsRenderer not ready: %s"), *ModuleErr);
+		UE_LOG(LogTemp, Error, TEXT("GaussianSplatImportRunner: NanoGS not ready: %s"), *ModuleErr);
 		PostImportToast(FString::Printf(TEXT("Splat import aborted: %s"), *ModuleErr), false);
 		return;
 	}
@@ -195,7 +273,7 @@ void AGaussianSplatImportRunner::ImportPLYIntoLevel()
 	if (GMaxRHIFeatureLevel < ERHIFeatureLevel::SM5)
 	{
 		UE_LOG(LogTemp, Error,
-			TEXT("GaussianSplatImportRunner: MLSLabsRenderer expects SM5+ (DX12). "
+			TEXT("GaussianSplatImportRunner: NanoGS expects SM5+ (DX12). "
 			     "Current feature level: %d"), static_cast<int32>(GMaxRHIFeatureLevel));
 		PostImportToast(TEXT("Gaussian splat requires SM5 / DX12 — splat not placed"), false);
 		return;
@@ -211,10 +289,39 @@ void AGaussianSplatImportRunner::ImportPLYIntoLevel()
 		return;
 	}
 
-	// ---- Step 4: Find or create "WorldLabs_Splat" AGaussianSplattingActor (Win64) ----
+	// ---- Step 4: Build the Gaussian Splat asset ----
+	// Editor: import as a persistent UGaussianSplatAsset via the NanoGS factory (Content Browser).
+	// Runtime / fallback: parse the .ply into a transient asset (FPLYFileReader + InitializeFromSplatData).
 	FString Err;
-	AActor* SplatActor = UGaussianSplatImportHelper::SpawnOrReloadWorldLabsSplatInWorld(
-		World, ResolvedPlyPath, SplatScale, SpawnPos, Err);
+	UGaussianSplatAsset* SplatAsset = nullptr;
+
+#if WITH_EDITOR
+	SplatAsset = ImportPlyViaFactory(ResolvedPlyPath, Err);
+	if (!SplatAsset)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("GaussianSplatImportRunner: factory import failed (%s) — falling back to transient asset."), *Err);
+	}
+#endif
+
+	if (!SplatAsset)
+	{
+		SplatAsset = FMLSGaussianSplatInterop::CreateSplatAssetFromPly(ResolvedPlyPath, World, Err);
+	}
+
+	if (!SplatAsset)
+	{
+		const FString Msg = Err.IsEmpty()
+			? TEXT("Splat import failed — check Output Log")
+			: FString::Printf(TEXT("Splat import failed: %s"), *Err);
+		PostImportToast(Msg, false);
+		return;
+	}
+
+	// ---- Step 5: Spawn / reload the "WorldLabs_Splat" actor with this asset ----
+	const FTransform SpawnXform(FRotator::ZeroRotator, SpawnPos, FVector::OneVector);
+	AActor* SplatActor = FMLSGaussianSplatInterop::SpawnActorWithAsset(
+		World, SplatAsset, SplatScale, SpawnXform, /*bReuseWorldLabsSingleton*/ true, Err);
 
 	LastSpawnedSplat = SplatActor;
 
@@ -227,17 +334,17 @@ void AGaussianSplatImportRunner::ImportPLYIntoLevel()
 		return;
 	}
 
-	// ---- Step 5: Scan asset registry so Content Browser reflects the new .ply ----
+	// ---- Step 6: Scan asset registry so Content Browser reflects the new .ply ----
 	FAssetRegistryModule::GetRegistry().ScanPathsSynchronous(
 		TArray<FString>{ TEXT("/Game/GaussianSplats") }, true);
 
-	// ---- Step 6: Redraw all viewports so the splat appears immediately ----
+	// ---- Step 7: Redraw all viewports so the splat appears immediately ----
 	if (GEditor)
 	{
 		GEditor->RedrawAllViewports(true);
 	}
 
-	// ---- Step 6: Success toast ----
+	// ---- Step 8: Success toast ----
 	PostImportToast(TEXT("Splat imported into level"), true);
 }
 

@@ -4,278 +4,137 @@
 #include "VirtualProductionSplat.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "GameFramework/Actor.h"
-#include "Components/ActorComponent.h"
-#include "UObject/Class.h"
-#include "UObject/UnrealType.h"
-#include "UObject/UObjectGlobals.h"
-
-#if PLATFORM_WINDOWS
-#include "Interfaces/IPluginManager.h"
 #include "Modules/ModuleManager.h"
-#endif
+#include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 
-#if PLATFORM_WINDOWS && WITH_EDITOR
-#include "Framework/Application/SlateApplication.h"
-#include "Framework/Notifications/NotificationManager.h"
-#include "Widgets/Notifications/SNotificationList.h"
+// NanoGS public API
+#include "GaussianDataTypes.h"
+#include "PLYFileReader.h"
+#include "GaussianSplatAsset.h"
+#include "GaussianSplatActor.h"
+#include "GaussianSplatComponent.h"
 
-static void MLSLabsInteropEditorNotify(const FString& Msg)
-{
-	if (!FSlateApplication::IsInitialized())
-	{
-		return;
-	}
-	FNotificationInfo Info(FText::FromString(Msg));
-	Info.ExpireDuration = 8.0f;
-	Info.bFireAndForget = true;
-	FSlateNotificationManager::Get().AddNotification(Info);
-}
-#endif
+static const TCHAR* GWorldLabsSplatLabel = TEXT("WorldLabs_Splat");
 
 bool FMLSGaussianSplatInterop::EnsureMLSLabsRendererReady(FString& OutError)
 {
-#if !PLATFORM_WINDOWS
-	OutError = TEXT("MLSLabsRenderer is Win64-only.");
-	return false;
-#else
-	TSharedPtr<IPlugin> Plug = IPluginManager::Get().FindPlugin(TEXT("MLSLabsRenderer"));
-	if (!Plug.IsValid())
-	{
-		OutError = TEXT("MLSLabsRenderer plugin not registered (missing Plugins/MLSLabsRenderer or .uplugin).");
-		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
-#if WITH_EDITOR
-		MLSLabsInteropEditorNotify(OutError);
-#endif
-		return false;
-	}
-	if (!Plug->IsEnabled())
-	{
-		OutError = TEXT("MLSLabsRenderer plugin is disabled in .uproject or Plugins browser.");
-		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
-#if WITH_EDITOR
-		MLSLabsInteropEditorNotify(OutError);
-#endif
-		return false;
-	}
-
 	FModuleManager& MM = FModuleManager::Get();
-	const FName ModName(TEXT("MLSLabsRenderer"));
+	const FName ModName(TEXT("NanoGS"));
 	if (MM.IsModuleLoaded(ModName))
 	{
 		return true;
 	}
-
-	IModuleInterface* Loaded = MM.LoadModule(ModName);
-	if (!Loaded)
+	if (MM.LoadModule(ModName))
 	{
-		OutError = TEXT("LoadModule(MLSLabsRenderer) failed - see Tools/MLSLABS_SURVIVAL_README.md and run Tools/fix_mlslabs.bat.");
-		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
-#if WITH_EDITOR
-		MLSLabsInteropEditorNotify(OutError);
-#endif
-		return false;
-	}
-	return true;
-#endif
-}
-
-#if PLATFORM_WINDOWS
-
-static bool SetStringPropertyIfPresent(UActorComponent* Comp, FName PropName, const FString& Value)
-{
-	if (!Comp)
-	{
-		return false;
-	}
-	FProperty* Prop = Comp->GetClass()->FindPropertyByName(PropName);
-	if (FStrProperty* SP = CastField<FStrProperty>(Prop))
-	{
-		if (FString* Mutable = SP->ContainerPtrToValuePtr<FString>(Comp))
-		{
-			*Mutable = Value;
-			return true;
-		}
-	}
-	return false;
-}
-
-UClass* FMLSGaussianSplatInterop::GetGaussianSplattingActorClass()
-{
-	FString Err;
-	if (!EnsureMLSLabsRendererReady(Err))
-	{
-		return nullptr;
-	}
-	if (UClass* Found = FindObject<UClass>(nullptr, TEXT("/Script/MLSLabsRenderer.GaussianSplattingActor")))
-	{
-		return Found;
-	}
-	return LoadClass<AActor>(nullptr, TEXT("/Script/MLSLabsRenderer.GaussianSplattingActor"));
-}
-
-UClass* FMLSGaussianSplatInterop::GetGaussianSplattingComponentClass()
-{
-	FString Err;
-	if (!EnsureMLSLabsRendererReady(Err))
-	{
-		return nullptr;
-	}
-	if (UClass* Found = FindObject<UClass>(nullptr, TEXT("/Script/MLSLabsRenderer.GaussianSplattingComponent")))
-	{
-		return Found;
-	}
-	return LoadClass<UActorComponent>(nullptr, TEXT("/Script/MLSLabsRenderer.GaussianSplattingComponent"));
-}
-
-UActorComponent* FMLSGaussianSplatInterop::FindGaussianSplattingComponent(AActor* Actor)
-{
-	if (!Actor)
-	{
-		return nullptr;
-	}
-	if (UClass* CompClass = GetGaussianSplattingComponentClass())
-	{
-		if (UActorComponent* C = Actor->GetComponentByClass(CompClass))
-		{
-			return C;
-		}
-	}
-	for (UActorComponent* C : Actor->GetComponents())
-	{
-		if (C && C->GetClass()->GetName() == TEXT("GaussianSplattingComponent"))
-		{
-			return C;
-		}
-	}
-	return nullptr;
-}
-
-bool FMLSGaussianSplatInterop::SetPrimaryPlyPathProperty(UActorComponent* GaussianComp, const FString& AbsolutePlyPath)
-{
-	if (!GaussianComp)
-	{
-		return false;
-	}
-
-	// Try full-path properties first.
-	if (SetStringPropertyIfPresent(GaussianComp, FName(TEXT("SplatDataPath")), AbsolutePlyPath))
-	{
-		UE_LOG(LogVPSplat, Log, TEXT("MLSGaussianSplatInterop: set SplatDataPath = %s"), *AbsolutePlyPath);
-	}
-
-	// Also populate dir+filename split — plugin checks these separately on some versions.
-	const FString Dir  = FPaths::GetPath(AbsolutePlyPath);
-	const FString File = FPaths::GetCleanFilename(AbsolutePlyPath);
-	SetStringPropertyIfPresent(GaussianComp, FName(TEXT("SplatFileDirName")), Dir);
-	SetStringPropertyIfPresent(GaussianComp, FName(TEXT("SplatFileName")),    File);
-
-	// Fallback: some releases accept the full path in SplatFileName directly.
-	if (SetStringPropertyIfPresent(GaussianComp, FName(TEXT("SplatFileName")), AbsolutePlyPath))
-	{
-		UE_LOG(LogVPSplat, Log, TEXT("MLSGaussianSplatInterop: set SplatFileName = %s"), *AbsolutePlyPath);
-	}
-
-	// Confirm at least SplatDataPath or SplatFileName was accepted.
-	FProperty* P1 = GaussianComp->GetClass()->FindPropertyByName(FName(TEXT("SplatDataPath")));
-	FProperty* P2 = GaussianComp->GetClass()->FindPropertyByName(FName(TEXT("SplatFileName")));
-	return (P1 != nullptr || P2 != nullptr);
-}
-
-bool FMLSGaussianSplatInterop::QueueLoadSplatData(UActorComponent* GaussianComp)
-{
-	if (!GaussianComp)
-	{
-		return false;
-	}
-
-	// Try every known UFUNCTION/native name the plugin has used across versions.
-	static const TCHAR* LoadFnNames[] = {
-		TEXT("QueueLoadSplatData"),
-		TEXT("LoadSplatFile"),
-		TEXT("LoadGaussianSplatFileCommand"),
-		TEXT("ReloadSplatData"),
-		TEXT("BeginLoadSplat"),
-	};
-	for (const TCHAR* FnName : LoadFnNames)
-	{
-		if (UFunction* Fn = GaussianComp->FindFunction(FName(FnName)))
-		{
-			GaussianComp->ProcessEvent(Fn, nullptr);
-			UE_LOG(LogVPSplat, Log, TEXT("MLSGaussianSplatInterop: triggered load via UFUNCTION '%s'"), FnName);
-			return true;
-		}
-	}
-
-	// No UFUNCTION found — QueueLoadSplatData is a non-reflected C++ method in this build.
-	// Notify the component via PostEditChangeProperty so it reacts to the new SplatDataPath,
-	// then dirty the render state to force a redraw once data arrives.
-	UE_LOG(LogVPSplat, Warning,
-		TEXT("MLSGaussianSplatInterop: no load UFUNCTION on %s — using PostEditChangeProperty + MarkRenderStateDirty fallback"),
-		*GaussianComp->GetClass()->GetName());
-
-#if WITH_EDITOR
-	for (const TCHAR* PropName : { TEXT("SplatDataPath"), TEXT("SplatFileName"), TEXT("SplatFileDirName") })
-	{
-		if (FProperty* Prop = GaussianComp->GetClass()->FindPropertyByName(FName(PropName)))
-		{
-			FPropertyChangedEvent ChangeEvent(Prop, EPropertyChangeType::ValueSet);
-			GaussianComp->PostEditChangeProperty(ChangeEvent);
-		}
-	}
-#endif
-
-	if (UPrimitiveComponent* Prim = Cast<UPrimitiveComponent>(GaussianComp))
-	{
-		Prim->MarkRenderStateDirty();
-	}
-
-	// Re-register to trigger OnRegister/BeginPlay load path.
-	if (GaussianComp->IsRegistered())
-	{
-		GaussianComp->UnregisterComponent();
-		GaussianComp->RegisterComponent();
-	}
-
-	return true; // Path was set; load will proceed asynchronously.
-}
-
-bool FMLSGaussianSplatInterop::RefreshBoundsFromLoadedSplat(UActorComponent* GaussianComp)
-{
-	if (!GaussianComp)
-	{
-		return false;
-	}
-	if (UFunction* Fn = GaussianComp->FindFunction(FName(TEXT("RefreshBoundsFromLoadedSplat"))))
-	{
-		GaussianComp->ProcessEvent(Fn, nullptr);
 		return true;
 	}
+	OutError = TEXT("NanoGS runtime module is not available (check Plugins/NanoGS_UE57 is enabled).");
+	UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
 	return false;
 }
 
-static bool ApplyPlyAndQueue(AActor* Actor, const FString& AbsolutePlyPath, FString& OutError)
+UGaussianSplatAsset* FMLSGaussianSplatInterop::CreateSplatAssetFromPly(
+	const FString& AbsolutePlyPath, UObject* Outer, FString& OutError)
 {
-	UActorComponent* Comp = FMLSGaussianSplatInterop::FindGaussianSplattingComponent(Actor);
-	if (!Comp)
+	TArray<FGaussianSplatData> Splats;
+	int32 SHBands = 0;
+	if (!FPLYFileReader::ReadPLYFile(AbsolutePlyPath, Splats, OutError, &SHBands))
 	{
-		OutError = TEXT("GaussianSplattingComponent not found on actor.");
+		// OutError filled by the reader.
+		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: PLY read failed: %s"), *OutError);
+		return nullptr;
+	}
+	if (Splats.Num() == 0)
+	{
+		OutError = TEXT("PLY parsed but contained zero splats.");
 		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
-		return false;
+		return nullptr;
 	}
-	if (!FMLSGaussianSplatInterop::SetPrimaryPlyPathProperty(Comp, AbsolutePlyPath))
+
+	UObject* AssetOuter = Outer ? Outer : (UObject*)GetTransientPackage();
+	UGaussianSplatAsset* Asset = NewObject<UGaussianSplatAsset>(AssetOuter);
+	if (!Asset)
 	{
-		OutError = TEXT("Could not set SplatDataPath / SplatFileName on GaussianSplattingComponent.");
+		OutError = TEXT("NewObject<UGaussianSplatAsset> failed.");
+		return nullptr;
+	}
+
+	Asset->InitializeFromSplatData(Splats, EGaussianQualityLevel::VeryHigh);
+	UE_LOG(LogVPSplat, Log, TEXT("MLSGaussianSplatInterop: built asset with %d splats (SH bands=%d) from %s"),
+		Splats.Num(), SHBands, *AbsolutePlyPath);
+	return Asset;
+}
+
+AActor* FMLSGaussianSplatInterop::SpawnActorWithAsset(
+	UWorld* World,
+	UGaussianSplatAsset* Asset,
+	float UniformScale,
+	const FTransform& WorldTransform,
+	bool bReuseWorldLabsSingleton,
+	FString& OutError)
+{
+	if (!World || !Asset)
+	{
+		OutError = TEXT("SpawnActorWithAsset: null world or asset.");
+		return nullptr;
+	}
+
+	const float CompScale = FMath::Clamp(UniformScale, 0.1f, 10.0f);
+
+	AGaussianSplatActor* TargetActor = nullptr;
+
+#if WITH_EDITOR
+	if (bReuseWorldLabsSingleton)
+	{
+		for (TActorIterator<AGaussianSplatActor> It(World); It; ++It)
+		{
+			if (It->GetActorLabel() == GWorldLabsSplatLabel)
+			{
+				TargetActor = *It;
+				break;
+			}
+		}
+	}
+#endif
+
+	if (TargetActor)
+	{
+		TargetActor->SetActorTransform(FTransform(WorldTransform.GetRotation(), WorldTransform.GetLocation(), FVector::OneVector));
+	}
+	else
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		const FTransform SpawnXform(WorldTransform.GetRotation(), WorldTransform.GetLocation(), FVector::OneVector);
+		TargetActor = World->SpawnActor<AGaussianSplatActor>(AGaussianSplatActor::StaticClass(), SpawnXform, Params);
+		if (!TargetActor)
+		{
+			OutError = TEXT("SpawnActor(AGaussianSplatActor) failed.");
+			UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
+			return nullptr;
+		}
+#if WITH_EDITOR
+		if (bReuseWorldLabsSingleton)
+		{
+			TargetActor->SetActorLabel(GWorldLabsSplatLabel);
+		}
+#endif
+	}
+
+	if (UGaussianSplatComponent* Comp = TargetActor->GaussianSplatComponent)
+	{
+		Comp->SetSplatAsset(Asset);
+		Comp->SplatScale = CompScale;
+	}
+	else
+	{
+		OutError = TEXT("AGaussianSplatActor spawned without a GaussianSplatComponent.");
 		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
-		return false;
+		return nullptr;
 	}
-	if (!FMLSGaussianSplatInterop::QueueLoadSplatData(Comp))
-	{
-		OutError = TEXT("QueueLoadSplatData failed.");
-		return false;
-	}
-	FMLSGaussianSplatInterop::RefreshBoundsFromLoadedSplat(Comp);
-	return true;
+
+	return TargetActor;
 }
 
 AActor* FMLSGaussianSplatInterop::SpawnGaussianSplatAt(
@@ -285,35 +144,17 @@ AActor* FMLSGaussianSplatInterop::SpawnGaussianSplatAt(
 	float UniformScale,
 	FString& OutError)
 {
-	UClass* ActorClass = GetGaussianSplattingActorClass();
-	if (!World || !ActorClass)
+	UGaussianSplatAsset* Asset = CreateSplatAssetFromPly(AbsolutePlyPath, World, OutError);
+	if (!Asset)
 	{
-		OutError = TEXT("MLSLabsRenderer not loaded or AGaussianSplattingActor class missing (Win64 editor only).");
-		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
 		return nullptr;
 	}
-
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	AActor* NewActor = World->SpawnActor(ActorClass, &WorldTransform, Params);
-	if (!NewActor)
+	AActor* Actor = SpawnActorWithAsset(World, Asset, UniformScale, WorldTransform, /*bReuseWorldLabsSingleton*/ false, OutError);
+	if (Actor)
 	{
-		OutError = TEXT("SpawnActor(AGaussianSplattingActor) failed.");
-		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
-		return nullptr;
+		UE_LOG(LogVPSplat, Log, TEXT("MLSGaussianSplatInterop: spawned Gaussian splat from %s"), *AbsolutePlyPath);
 	}
-
-	const float S = FMath::Max(UniformScale, KINDA_SMALL_NUMBER);
-	NewActor->SetActorScale3D(FVector(S));
-
-	if (!ApplyPlyAndQueue(NewActor, AbsolutePlyPath, OutError))
-	{
-		NewActor->Destroy();
-		return nullptr;
-	}
-
-	UE_LOG(LogVPSplat, Log, TEXT("MLSGaussianSplatInterop: spawned Gaussian splat at %s"), *AbsolutePlyPath);
-	return NewActor;
+	return Actor;
 }
 
 AActor* FMLSGaussianSplatInterop::SpawnOrReloadWorldLabsSplat(
@@ -323,60 +164,18 @@ AActor* FMLSGaussianSplatInterop::SpawnOrReloadWorldLabsSplat(
 	const FVector& SpawnLocation,
 	FString& OutError)
 {
-	UClass* ActorClass = GetGaussianSplattingActorClass();
-	if (!World || !ActorClass)
+	UGaussianSplatAsset* Asset = CreateSplatAssetFromPly(AbsolutePlyPath, World, OutError);
+	if (!Asset)
 	{
-		OutError = TEXT("MLSLabsRenderer not loaded or AGaussianSplattingActor class missing (Win64 editor only).");
-		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
 		return nullptr;
 	}
-
-	AActor* Existing = nullptr;
-	for (TActorIterator<AActor> It(World, ActorClass); It; ++It)
+	const FTransform Xform(FRotator::ZeroRotator, SpawnLocation, FVector::OneVector);
+	AActor* Actor = SpawnActorWithAsset(World, Asset, UniformScale, Xform, /*bReuseWorldLabsSingleton*/ true, OutError);
+	if (Actor)
 	{
-		if (It->GetActorLabel() == TEXT("WorldLabs_Splat"))
-		{
-			Existing = *It;
-			break;
-		}
+		UE_LOG(LogVPSplat, Log, TEXT("MLSGaussianSplatInterop: spawned/reloaded WorldLabs_Splat at %s"), *SpawnLocation.ToString());
 	}
-
-	const float S = FMath::Max(UniformScale, KINDA_SMALL_NUMBER);
-
-	if (Existing)
-	{
-		Existing->SetActorLocation(SpawnLocation);
-		Existing->SetActorScale3D(FVector(S));
-		if (!ApplyPlyAndQueue(Existing, AbsolutePlyPath, OutError))
-		{
-			return nullptr;
-		}
-		UE_LOG(LogVPSplat, Log, TEXT("MLSGaussianSplatInterop: reloaded WorldLabs_Splat"));
-		return Existing;
-	}
-
-	const FTransform SpawnTransform(FRotator::ZeroRotator, SpawnLocation);
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	AActor* NewActor = World->SpawnActor(ActorClass, &SpawnTransform, Params);
-	if (!NewActor)
-	{
-		OutError = TEXT("SpawnActor(AGaussianSplattingActor) failed.");
-		UE_LOG(LogVPSplat, Error, TEXT("MLSGaussianSplatInterop: %s"), *OutError);
-		return nullptr;
-	}
-
-	NewActor->SetActorLabel(TEXT("WorldLabs_Splat"));
-	NewActor->SetActorScale3D(FVector(S));
-
-	if (!ApplyPlyAndQueue(NewActor, AbsolutePlyPath, OutError))
-	{
-		NewActor->Destroy();
-		return nullptr;
-	}
-
-	UE_LOG(LogVPSplat, Log, TEXT("MLSGaussianSplatInterop: spawned WorldLabs_Splat at %s"), *SpawnLocation.ToString());
-	return NewActor;
+	return Actor;
 }
 
 bool FMLSGaussianSplatInterop::WorldHasMLSGaussianActor(UWorld* World)
@@ -385,67 +184,9 @@ bool FMLSGaussianSplatInterop::WorldHasMLSGaussianActor(UWorld* World)
 	{
 		return false;
 	}
-	UClass* ActorClass = GetGaussianSplattingActorClass();
-	if (!ActorClass)
-	{
-		return false;
-	}
-	for (TActorIterator<AActor> It(World, ActorClass); It; ++It)
+	for (TActorIterator<AGaussianSplatActor> It(World); It; ++It)
 	{
 		return true;
 	}
 	return false;
 }
-
-#else // !PLATFORM_WINDOWS
-
-UClass* FMLSGaussianSplatInterop::GetGaussianSplattingActorClass()
-{
-	return nullptr;
-}
-UClass* FMLSGaussianSplatInterop::GetGaussianSplattingComponentClass()
-{
-	return nullptr;
-}
-UActorComponent* FMLSGaussianSplatInterop::FindGaussianSplattingComponent(AActor* Actor)
-{
-	return nullptr;
-}
-bool FMLSGaussianSplatInterop::SetPrimaryPlyPathProperty(UActorComponent* GaussianComp, const FString& AbsolutePlyPath)
-{
-	return false;
-}
-bool FMLSGaussianSplatInterop::QueueLoadSplatData(UActorComponent* GaussianComp)
-{
-	return false;
-}
-bool FMLSGaussianSplatInterop::RefreshBoundsFromLoadedSplat(UActorComponent* GaussianComp)
-{
-	return false;
-}
-AActor* FMLSGaussianSplatInterop::SpawnGaussianSplatAt(
-	UWorld* World,
-	const FString& AbsolutePlyPath,
-	const FTransform& WorldTransform,
-	float UniformScale,
-	FString& OutError)
-{
-	OutError = TEXT("MLSLabsRenderer is Win64-only.");
-	return nullptr;
-}
-AActor* FMLSGaussianSplatInterop::SpawnOrReloadWorldLabsSplat(
-	UWorld* World,
-	const FString& AbsolutePlyPath,
-	float UniformScale,
-	const FVector& SpawnLocation,
-	FString& OutError)
-{
-	OutError = TEXT("MLSLabsRenderer is Win64-only.");
-	return nullptr;
-}
-bool FMLSGaussianSplatInterop::WorldHasMLSGaussianActor(UWorld* World)
-{
-	return false;
-}
-
-#endif // PLATFORM_WINDOWS

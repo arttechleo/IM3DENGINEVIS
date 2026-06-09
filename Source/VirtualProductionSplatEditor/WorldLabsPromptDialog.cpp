@@ -745,6 +745,7 @@ void SWorldLabsPromptDialog::DoAnalyzeWithScreenshot(const FString& ScreenshotPa
 		ScreenshotPath,
 		UserIntent,
 		NoRefs,
+		SceneAnalysis,
 		FOnRefinedPrompt::CreateLambda([DialogWeakPtr, RefinerRaw](FString Refined)
 		{
 			// Always clean up root reference

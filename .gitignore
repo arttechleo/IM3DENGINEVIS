@@ -38,3 +38,10 @@ Saved/libtorch_tmp.zip
 *.VC.db
 *.opensdf
 *.sdf
+
+# Generated Gaussian splat outputs (regenerated via WorldLabs/NanoGS pipeline — keep out of repo)
+Content/MLSLabsRenderer/
+Content/zaha.uasset
+
+# Editor scheduler lock
+.claude/scheduled_tasks.lock

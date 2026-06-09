@@ -3,6 +3,7 @@
 #include "WorldLabsRunner.h"
 #include "WorldLabsAPIClient.h"
 #include "WorldLabsPromptHistoryStore.h"
+#include "WorldLabsPromptBuilder.h"
 #include "ClaudePromptRefiner.h"
 #include "MultiAngleCameraRig.h"
 #include "GaussianSplatImportRunner.h"
@@ -226,6 +227,7 @@ void AWorldLabsRunner::SubmitToWorldLabs()
 				PanoramaPath,
 				WorldPrompt,
 				StyleReferenceImagePaths,
+				FWorldLabsPromptBuilder::AnalyzeScene(GetWorld()),
 				FOnRefinedPrompt::CreateUObject(this, &AWorldLabsRunner::OnRefinedPrompt));
 			return;
 		}

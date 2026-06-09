@@ -6,6 +6,7 @@
 #include "UObject/Object.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
+#include "VPSceneAnalysisResult.h"
 #include "ClaudePromptRefiner.generated.h"
 
 DECLARE_DELEGATE_OneParam(FOnRefinedPrompt, FString);
@@ -21,6 +22,7 @@ public:
 		const FString& PanoramaPath,
 		const FString& UserIntent,
 		const TArray<FString>& RefImagePaths,
+		const FSceneAnalysisResult& Analysis,
 		FOnRefinedPrompt OnComplete
 	);
 

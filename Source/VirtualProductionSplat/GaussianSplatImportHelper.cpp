@@ -32,6 +32,8 @@ AActor* UGaussianSplatImportHelper::SpawnGaussianSplatAt(
 		return nullptr;
 	}
 
+	// Builds a UGaussianSplatAsset from the .ply, spawns AGaussianSplatActor, assigns the asset
+	// and sets the component SplatScale.
 	FString Err;
 	if (AActor* Actor = FMLSGaussianSplatInterop::SpawnGaussianSplatAt(World, FullPath, WorldTransform, SplatScale, Err))
 	{

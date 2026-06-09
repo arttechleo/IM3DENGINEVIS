@@ -42,6 +42,7 @@ void UClaudePromptRefiner::RefinePrompt(
 	const FString& PanoramaPath,
 	const FString& UserIntent,
 	const TArray<FString>& RefImagePaths,
+	const FSceneAnalysisResult& Analysis,
 	FOnRefinedPrompt OnComplete)
 {
 	CompletionDelegate = OnComplete;
@@ -67,6 +68,33 @@ void UClaudePromptRefiner::RefinePrompt(
 		{
 			ContentArray.Add(MakeShared<FJsonValueObject>(MakeBase64ImageContent(RefData, TEXT("image/png"))));
 		}
+	}
+
+	// Scene spatial data block
+	if (!Analysis.SpatialDescription.IsEmpty())
+	{
+		const FString SpatialText = FString::Printf(
+			TEXT("SCENE SPATIAL DATA (live analysis): %s\n"
+			     "Dominant shape: %s\n"
+			     "Dimensions: %.1fm wide, %.1fm tall\n"
+			     "Interior: %s\n"
+			     "Has ceiling: %s\n"
+			     "INSTRUCTION: Use this spatial data to inform scale, "
+			     "enclosure, horizon visibility, and sky treatment "
+			     "in your refined prompt. The generated world must "
+			     "match this spatial footprint so it aligns with "
+			     "the greybox when imported at origin."),
+			*Analysis.SpatialDescription,
+			*Analysis.DominantShape,
+			Analysis.DominantHorizontalExtentM,
+			Analysis.VerticalExtentM,
+			Analysis.bIsInteriorSpace ? TEXT("true") : TEXT("false"),
+			Analysis.bHasCeiling      ? TEXT("true") : TEXT("false")
+		);
+		TSharedPtr<FJsonObject> SpatialObj = MakeShared<FJsonObject>();
+		SpatialObj->SetStringField(TEXT("type"), TEXT("text"));
+		SpatialObj->SetStringField(TEXT("text"), SpatialText);
+		ContentArray.Add(MakeShared<FJsonValueObject>(SpatialObj));
 	}
 
 	// Text turn

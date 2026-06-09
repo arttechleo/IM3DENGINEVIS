@@ -9,7 +9,8 @@
 class AActor;
 
 /**
- * Editor-placed actor: spawn a CS Gaussian splat from a .ply path (e.g. after WorldLabs download to Content/GaussianSplats).
+ * Editor-placed actor: import a .ply (e.g. after WorldLabs download to Content/GaussianSplats) as a
+ * NanoGS UGaussianSplatAsset and spawn an AGaussianSplatActor for it.
  */
 UCLASS(Blueprintable, BlueprintType, placeable)
 class VIRTUALPRODUCTIONSPLATEDITOR_API AGaussianSplatImportRunner : public AActor
@@ -23,7 +24,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "VP Pipeline|Gaussian")
 	FString PLYFilePath;
 
-	/** Uniform actor scale after spawn (MLSLabs AGaussianSplattingActor). */
+	/** Uniform splat scale, applied to NanoGS UGaussianSplatComponent::SplatScale (0.1–10). */
 	UPROPERTY(EditAnywhere, Category = "VP Pipeline|Gaussian", meta = (ClampMin = "0.01", UIMin = "0.01", UIMax = "5.0"))
 	float SplatScale = 1.f;
 

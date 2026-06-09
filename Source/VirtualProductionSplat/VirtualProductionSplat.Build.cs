@@ -21,7 +21,8 @@ public class VirtualProductionSplat : ModuleRules
 			"HTTP",
 			"Json",
 			"JsonUtilities",
-			"ImageWrapper"
+			"ImageWrapper",
+			"NanoGS"          // Gaussian Splat renderer plugin (AGaussianSplatActor, UGaussianSplatAsset, FPLYFileReader)
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

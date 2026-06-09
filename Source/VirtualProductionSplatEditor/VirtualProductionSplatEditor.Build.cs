@@ -39,6 +39,13 @@ public class VirtualProductionSplatEditor : ModuleRules
 			"RenderCore",       // GShaderCompilingManager (via ShaderCompiler.h in Engine)
 			"DesktopPlatform",  // IDesktopPlatform file open dialog
 			"AssetRegistry",    // FAssetRegistryModule::GetRegistry().ScanPathsSynchronous
+			"NanoGS",           // UGaussianSplatAsset / AGaussianSplatActor (runtime types used by the runner)
 		});
+
+		// Editor-only NanoGS module: UGaussianSplatAssetFactory (.ply import). Guarded so non-editor targets skip it.
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.Add("NanoGSEditor");
+		}
 	}
 }

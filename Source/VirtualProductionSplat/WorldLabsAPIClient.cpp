@@ -15,6 +15,13 @@
 #include "Misc/Paths.h"
 #include "TimerManager.h"
 
+static FString GetJsonKeys(const TSharedPtr<FJsonObject>& Obj)
+{
+	TArray<FString> Keys;
+	for (auto& Pair : Obj->Values) Keys.Add(Pair.Key);
+	return FString::Join(Keys, TEXT(", "));
+}
+
 UWorldLabsAPIClient::UWorldLabsAPIClient() = default;
 
 void UWorldLabsAPIClient::BeginDestroy()
@@ -524,6 +531,39 @@ void UWorldLabsAPIClient::OnFetchWorldResponse(FHttpRequestPtr HttpRequest, FHtt
 	{
 		OnWorldFailed.ExecuteIfBound(TEXT("GET world: invalid JSON"));
 		return;
+	}
+
+	// Probe world ID from GET /worlds/{id} response (multiple key paths).
+	if (LastWorldId.IsEmpty())
+	{
+		for (FString Key : { TEXT("id"), TEXT("world_id"), TEXT("worldId") })
+		{
+			FString Val;
+			if (Root->TryGetStringField(Key, Val) && !Val.IsEmpty())
+			{
+				LastWorldId = Val;
+				UE_LOG(LogTemp, Warning,
+					TEXT("WorldLabsAPI: LastWorldId resolved via key '%s' = %s"),
+					*Key, *Val);
+				break;
+			}
+		}
+		const TSharedPtr<FJsonObject>* DataObj;
+		if (LastWorldId.IsEmpty() && Root->TryGetObjectField(TEXT("data"), DataObj))
+		{
+			(*DataObj)->TryGetStringField(TEXT("id"), LastWorldId);
+		}
+
+		if (LastWorldId.IsEmpty())
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("WorldLabsAPI: LastWorldId not found. Keys: %s"),
+				*GetJsonKeys(Root));
+		}
+		else
+		{
+			LastWorldUrl = FString::Printf(TEXT("https://marble.worldlabs.ai/world/%s"), *LastWorldId);
+		}
 	}
 
 	// Prefer SPZ downloads (world assets return .spz URLs).

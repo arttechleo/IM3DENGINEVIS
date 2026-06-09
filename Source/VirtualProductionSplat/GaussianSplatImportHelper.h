@@ -10,7 +10,9 @@ class AActor;
 class UWorld;
 
 /**
- * Spawns MLSLabs AGaussianSplattingActor (Win64) and loads a .ply via SplatDataPath + QueueLoadSplatData.
+ * Blueprint/editor-facing wrapper. Spawns a NanoGS AGaussianSplatActor from a .ply:
+ * the file is parsed into a UGaussianSplatAsset and assigned to the actor's
+ * UGaussianSplatComponent (see FMLSGaussianSplatInterop).
  */
 UCLASS()
 class VIRTUALPRODUCTIONSPLAT_API UGaussianSplatImportHelper : public UObject
@@ -19,10 +21,10 @@ class VIRTUALPRODUCTIONSPLAT_API UGaussianSplatImportHelper : public UObject
 
 public:
 	/**
-	 * Spawns AGaussianSplattingActor at WorldTransform and queues PLY load.
+	 * Spawns an AGaussianSplatActor at WorldTransform and assigns a splat asset built from the .ply.
 	 * @param AbsolutePLYPath Full path to .ply (e.g. under Saved/ or project Content/).
-	 * @param SplatScale Uniform actor scale after spawn (MLSLabs has no separate SplatScale property).
-	 * @return Spawned actor, or nullptr if world missing or spawn/load failed.
+	 * @param SplatScale Uniform splat scale, applied to UGaussianSplatComponent::SplatScale (0.1–10).
+	 * @return Spawned actor, or nullptr if world missing or load/spawn failed.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "VP Pipeline|Gaussian", meta = (WorldContext = "WorldContextObject"))
 	static AActor* SpawnGaussianSplatAt(
@@ -31,10 +33,10 @@ public:
 		const FTransform& WorldTransform,
 		float SplatScale = 1.f);
 
-	/** Exported for editor module — detects MLSLabs AGaussianSplattingActor (Win64). */
+	/** Exported for editor module — true if any NanoGS AGaussianSplatActor exists in the world. */
 	static bool WorldHasMLSGaussianActorInWorld(UWorld* World);
 
-	/** Exported for editor module — find/reload WorldLabs_Splat or spawn new MLSLabs actor. */
+	/** Exported for editor module — find/reload "WorldLabs_Splat" or spawn a new NanoGS actor. */
 	static AActor* SpawnOrReloadWorldLabsSplatInWorld(
 		UWorld* World,
 		const FString& AbsolutePlyPath,

@@ -18,7 +18,11 @@
       "Bash(/S/EpicGamesLauncher/UE_5.7/Engine/Build/BatchFiles/Build.bat VirtualProductionSplatEditor *)",
       "PowerShell(Move-Item *)",
       "Bash(/S/EpicGamesLauncher/UE_5.7/Engine/Binaries/ThirdParty/Python3/Win64/python.exe *)",
-      "PowerShell(Get-ChildItem \"S:\\\\Projects\\\\2026\\\\UnrealEngine\\\\AIProject\\\\Plugins\\\\MLSLabsRenderer\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object FullName | Format-List)"
+      "PowerShell(Get-ChildItem \"S:\\\\Projects\\\\2026\\\\UnrealEngine\\\\AIProject\\\\Plugins\\\\MLSLabsRenderer\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object FullName | Format-List)",
+      "Bash(dir *)",
+      "Bash(powershell *)",
+      "Bash(S:/EpicGamesLauncher/UE_5.7/Engine/Binaries/ThirdParty/Python3/Win64/python.exe *)",
+      "PowerShell($crashes = Get-ChildItem \"S:\\\\Projects\\\\2026\\\\UnrealEngine\\\\AIProject\\\\Saved\\\\Crashes\\\\\"; $crashes | Sort-Object LastWriteTime | Select-Object -Last 5 | ForEach-Object { \"$\\($_.LastWriteTime\\)  $\\($_.Name\\)\" })"
     ]
   }
 }

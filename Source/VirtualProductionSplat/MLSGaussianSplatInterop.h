@@ -5,35 +5,45 @@
 #include "CoreMinimal.h"
 
 class AActor;
-class UActorComponent;
-class UClass;
+class UObject;
 class UWorld;
+class UGaussianSplatAsset;
 
 /**
- * Win64: MLSLabsRenderer Pro ships without Public headers in the release ZIP.
- * These helpers locate AGaussianSplattingActor / UGaussianSplattingComponent via reflection
- * and drive loading using documented property "SplatDataPath" + QueueLoadSplatData().
+ * Thin bridge from project pipeline code to the NanoGS plugin.
+ *
+ * NanoGS ships real public headers (NANOGS_API), so there is no reflection here:
+ * a .ply is parsed with FPLYFileReader into a transient UGaussianSplatAsset, then an
+ * AGaussianSplatActor is spawned and pointed at that asset via UGaussianSplatComponent.
+ *
+ * (Type name kept as FMLSGaussianSplatInterop for source compatibility with existing callers.)
  */
 struct VIRTUALPRODUCTIONSPLAT_API FMLSGaussianSplatInterop
 {
-	/** Win64: ensure plugin is enabled and MLSLabsRenderer runtime module loaded. Logs + optional editor toast on failure. */
+	/** True if the NanoGS runtime module is loaded (loads it on demand). OutError filled otherwise. */
 	static bool EnsureMLSLabsRendererReady(FString& OutError);
 
-	static UClass* GetGaussianSplattingActorClass();
-	static UClass* GetGaussianSplattingComponentClass();
-
-	static UActorComponent* FindGaussianSplattingComponent(AActor* Actor);
-
-	/** Sets FString property on the component if present (tries SplatDataPath, then SplatFileName). */
-	static bool SetPrimaryPlyPathProperty(UActorComponent* GaussianComp, const FString& AbsolutePlyPath);
-
-	static bool QueueLoadSplatData(UActorComponent* GaussianComp);
-	static bool RefreshBoundsFromLoadedSplat(UActorComponent* GaussianComp);
-
 	/**
-	 * Spawns AGaussianSplattingActor at WorldTransform, sets uniform world scale, assigns PLY path, queues load.
+	 * Reads a .ply via FPLYFileReader and builds a transient UGaussianSplatAsset.
+	 * @param Outer Owning object for the new asset (defaults to the transient package if null).
 	 * @return nullptr on failure (OutError filled).
 	 */
+	static UGaussianSplatAsset* CreateSplatAssetFromPly(const FString& AbsolutePlyPath, UObject* Outer, FString& OutError);
+
+	/**
+	 * Spawns (or, when bReuseWorldLabsSingleton, reuses an actor labelled "WorldLabs_Splat") an
+	 * AGaussianSplatActor at WorldTransform, assigns Asset, and sets the component SplatScale.
+	 * @return nullptr on failure (OutError filled).
+	 */
+	static AActor* SpawnActorWithAsset(
+		UWorld* World,
+		UGaussianSplatAsset* Asset,
+		float UniformScale,
+		const FTransform& WorldTransform,
+		bool bReuseWorldLabsSingleton,
+		FString& OutError);
+
+	/** Creates an asset from the .ply and spawns a fresh AGaussianSplatActor at WorldTransform. */
 	static AActor* SpawnGaussianSplatAt(
 		UWorld* World,
 		const FString& AbsolutePlyPath,
@@ -41,10 +51,7 @@ struct VIRTUALPRODUCTIONSPLAT_API FMLSGaussianSplatInterop
 		float UniformScale,
 		FString& OutError);
 
-	/**
-	 * Finds an actor labelled WorldLabs_Splat of the MLS Gaussian class, or spawns a new one at SpawnLocation.
-	 * Updates path + reload on existing actor.
-	 */
+	/** Find/reload the "WorldLabs_Splat" actor or spawn a new one at SpawnLocation. */
 	static AActor* SpawnOrReloadWorldLabsSplat(
 		UWorld* World,
 		const FString& AbsolutePlyPath,
@@ -52,6 +59,6 @@ struct VIRTUALPRODUCTIONSPLAT_API FMLSGaussianSplatInterop
 		const FVector& SpawnLocation,
 		FString& OutError);
 
-	/** True if any AGaussianSplattingActor exists in the world. */
+	/** True if any AGaussianSplatActor exists in the world. */
 	static bool WorldHasMLSGaussianActor(UWorld* World);
 };

@@ -1,63 +1,95 @@
 #include "WorldLabsPromptBuilder.h"
 #include "Engine/World.h"
-#include "Engine/StaticMeshActor.h"
-#include "Engine/SkyLight.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Engine/DirectionalLight.h"
 #include "EngineUtils.h"
+#include "GameFramework/Actor.h"
 
-FWorldLabsSceneAnalysis FWorldLabsPromptBuilder::AnalyzeScene(UWorld* World)
+FSceneAnalysisResult FWorldLabsPromptBuilder::AnalyzeScene(UWorld* World)
 {
-	FWorldLabsSceneAnalysis Result;
-	if (!World)
+	FSceneAnalysisResult Result;
+	if (!World) return Result;
+
+	TArray<AActor*> GreyboxActors;
+	for (TActorIterator<AActor> It(World); It; ++It)
 	{
-		return Result;
+		AActor* Actor = *It;
+		if (Actor->ActorHasTag(TEXT("GreyboxVPSplatBuild")))
+			GreyboxActors.Add(Actor);
+	}
+	Result.GreyboxActorCount = GreyboxActors.Num();
+	if (GreyboxActors.Num() == 0) return Result;
+
+	FBox SceneBox(EForceInit::ForceInit);
+	for (AActor* A : GreyboxActors)
+		SceneBox += A->GetComponentsBoundingBox(true);
+
+	Result.SceneBoundsMin = SceneBox.Min;
+	Result.SceneBoundsMax = SceneBox.Max;
+	Result.SceneExtent    = SceneBox.GetExtent() * 2.f;
+	Result.SceneCenter    = SceneBox.GetCenter();
+	Result.EstimatedFloorZ = SceneBox.Min.Z;
+
+	Result.DominantHorizontalExtentM =
+		FMath::Max(Result.SceneExtent.X, Result.SceneExtent.Y) / 100.f;
+	Result.VerticalExtentM = Result.SceneExtent.Z / 100.f;
+
+	for (AActor* A : GreyboxActors)
+	{
+		FString Name = A->GetActorLabel().ToLower();
+		if (Name.Contains(TEXT("wall")) || Name.Contains(TEXT("facade")))
+			Result.WallActorCount++;
+		else if (Name.Contains(TEXT("floor")) || Name.Contains(TEXT("ground"))
+			  || Name.Contains(TEXT("plane")))
+			Result.FloorActorCount++;
+		else
+			Result.PropActorCount++;
 	}
 
-	for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
-	{
-		const AActor* Actor = *It;
-		if (!Actor)
-		{
-			continue;
-		}
+	float CeilingThreshold = Result.SceneBoundsMin.Z + Result.SceneExtent.Z * 0.8f;
+	for (AActor* A : GreyboxActors)
+		if (A->GetActorLocation().Z > CeilingThreshold)
+		{ Result.bHasCeiling = true; break; }
 
-		const bool bTaggedGreybox = Actor->ActorHasTag(TEXT("GreyboxVPSplatBuild"));
-		const FString Label = Actor->GetActorNameOrLabel();
-		const bool bLooksLikeGreybox =
-			Label.Contains(TEXT("Ground")) ||
-			Label.Contains(TEXT("Wall_")) ||
-			Label.Contains(TEXT("Pillar")) ||
-			Label.Contains(TEXT("Ramp"));
-
-		if (bTaggedGreybox || bLooksLikeGreybox)
-		{
-			++Result.GreyboxActorCount;
-		}
-	}
-
-	for (TActorIterator<ASkyLight> It(World); It; ++It)
+	float CenterX = Result.SceneCenter.X;
+	float CenterY = Result.SceneCenter.Y;
+	bool bWallNorth=false, bWallSouth=false, bWallEast=false, bWallWest=false;
+	for (AActor* A : GreyboxActors)
 	{
-		Result.bHasSkyActors = true;
-		break;
+		FVector L = A->GetActorLocation();
+		if (L.Y > CenterY + 200) bWallNorth = true;
+		if (L.Y < CenterY - 200) bWallSouth = true;
+		if (L.X > CenterX + 200) bWallEast  = true;
+		if (L.X < CenterX - 200) bWallWest  = true;
 	}
-	if (!Result.bHasSkyActors)
-	{
-		for (TActorIterator<ASkyAtmosphere> It(World); It; ++It)
-		{
-			Result.bHasSkyActors = true;
-			break;
-		}
-	}
-	if (!Result.bHasSkyActors)
-	{
-		for (TActorIterator<ADirectionalLight> It(World); It; ++It)
-		{
-			Result.bHasSkyActors = true;
-			break;
-		}
-	}
+	int32 SidesWithWalls = (bWallNorth?1:0)+(bWallSouth?1:0)+
+	                       (bWallEast?1:0)+(bWallWest?1:0);
+	Result.bIsInteriorSpace = (SidesWithWalls >= 3);
+	Result.bHasOpenHorizon  = (Result.DominantHorizontalExtentM > 20.f);
 
+	float Ratio = Result.SceneExtent.X / FMath::Max(Result.SceneExtent.Y, 1.f);
+	if (Ratio > 2.5f || Ratio < 0.4f)
+		Result.DominantShape = TEXT("linear corridor");
+	else if (SidesWithWalls == 2 &&
+	         (bWallNorth || bWallSouth) && (bWallEast || bWallWest))
+		Result.DominantShape = TEXT("L-shaped space");
+	else if (SidesWithWalls == 3)
+		Result.DominantShape = TEXT("U-shaped courtyard");
+	else if (SidesWithWalls == 4)
+		Result.DominantShape = TEXT("enclosed room");
+	else
+		Result.DominantShape = TEXT("open field");
+
+	Result.SpatialDescription = FString::Printf(
+		TEXT("%.0f x %.0f meters, %.0f meters tall, %s, %d walls, %s horizon, %s"),
+		Result.SceneExtent.X / 100.f,
+		Result.SceneExtent.Y / 100.f,
+		Result.VerticalExtentM,
+		*Result.DominantShape,
+		Result.WallActorCount,
+		Result.bHasOpenHorizon ? TEXT("open") : TEXT("tight"),
+		Result.bHasCeiling ? TEXT("ceiling present") : TEXT("no ceiling")
+	);
+
+	UE_LOG(LogTemp, Warning, TEXT("PromptBuilder: %s"), *Result.SpatialDescription);
 	return Result;
 }
 
@@ -66,9 +98,45 @@ FString FWorldLabsPromptBuilder::BuildPrompt(
 	const FString& TimeOfDay,
 	const FString& Mood,
 	const FString& AdditionalNotes,
-	const FWorldLabsSceneAnalysis& SceneAnalysis)
+	const FSceneAnalysisResult& SceneAnalysis)
 {
 	const FString Notes = AdditionalNotes.TrimStartAndEnd();
+
+	// Spatial constraints block — injected from live scene analysis
+	FString SpatialBlock;
+
+	if (SceneAnalysis.bIsInteriorSpace)
+		SpatialBlock += TEXT(
+			"SPATIAL CONTEXT: This is an interior-style layout. "
+			"Generate a space that feels enclosed but architecturally "
+			"rich — courtyards, ruins, cave chambers, or walled gardens. ");
+	else
+		SpatialBlock += TEXT(
+			"SPATIAL CONTEXT: This is an open layout. "
+			"Generate a vast outdoor environment with a visible horizon. "
+			"No walls, no ceilings. Sky must be visible. ");
+
+	if (!SceneAnalysis.SpatialDescription.IsEmpty())
+		SpatialBlock += FString::Printf(
+			TEXT("Scene footprint: %s. "),
+			*SceneAnalysis.SpatialDescription);
+
+	if (SceneAnalysis.bHasCeiling)
+		SpatialBlock += TEXT(
+			"IMPORTANT: A ceiling structure is present — "
+			"generate a natural overhead element like a cave roof, "
+			"forest canopy, or overhanging cliff. Do NOT leave the sky open. ");
+	else
+		SpatialBlock += TEXT(
+			"IMPORTANT: No ceiling. Upper hemisphere must show open sky, "
+			"clouds, or stars. ");
+
+	if (SceneAnalysis.VerticalExtentM > 0.f)
+		SpatialBlock += FString::Printf(
+			TEXT("Camera eye height is approximately %.1f meters above floor. "
+			     "Ensure ground surface is visible and textured. "),
+			(SceneAnalysis.SceneCenter.Z - SceneAnalysis.EstimatedFloorZ) / 100.f);
+
 	const FString GeometryContext = SceneAnalysis.GreyboxActorCount > 0
 		? FString::Printf(
 			TEXT("The scene contains %d detected greybox structural elements. Treat them as walls, platforms, and architectural forms integrated into a larger open world."),
@@ -79,7 +147,6 @@ FString FWorldLabsPromptBuilder::BuildPrompt(
 		? TEXT("Use natural sky lighting and atmospheric depth with visible open sky.")
 		: TEXT("Ensure strong open-sky readability and natural exterior lighting.");
 
-	// Sky protection block (always applied to all presets)
 	const FString SkyProtection = TEXT(
 		"CRITICAL: The upper 40% of the equirectangular image (sky region) must be treated as open sky/atmosphere only. "
 		"Any geometric shapes visible in the sky region are sensor artifacts from the 360 camera rig - ignore them completely. "
@@ -96,7 +163,8 @@ FString FWorldLabsPromptBuilder::BuildPrompt(
 		*UpperHemisphereNoGeometry,
 		*GeometryContext);
 
-	FString Prompt = FString::Printf(
+	FString Prompt = SpatialBlock + TEXT("\n\n");
+	Prompt += FString::Printf(
 		TEXT("Transform this architectural greybox into a photorealistic open environment.\n")
 		TEXT("Environment preset: %s.\n")
 		TEXT("Time of day: %s.\n")
