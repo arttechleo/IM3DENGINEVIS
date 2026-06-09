@@ -69,51 +69,35 @@ def check_defaultgame_not_tracked():
 
 
 # ---------------------------------------------------------------------------
-# PLUGIN CHECKS
+# PLUGIN CHECKS (NanoGS — the Gaussian splat renderer)
 # ---------------------------------------------------------------------------
 
-def check_mlslabs_uplugin():
-    uplugin = PROJECT_ROOT / "Plugins/MLSLabsRenderer/MLSLabsRenderer.uplugin"
+def check_nanogs_uplugin():
+    uplugin = PROJECT_ROOT / "Plugins/NanoGS/NanoGS.uplugin"
     if not uplugin.exists():
-        record(FAIL, "MLSLabsRenderer_Uplugin", f"not found: {uplugin}")
+        record(FAIL, "NanoGS_Uplugin", f"not found: {uplugin}")
         return
     try:
         with open(uplugin) as f:
             data = json.load(f)
     except Exception as e:
-        record(FAIL, "MLSLabsRenderer_Uplugin", f"JSON parse error: {e}")
+        record(FAIL, "NanoGS_Uplugin", f"JSON parse error: {e}")
         return
-    # Vendor ships PostConfigInit — cannot change without modifying plugin files.
-    # Accepted phases: PostEngineInit (ideal) or PostConfigInit (vendor default).
-    accepted = {"PostEngineInit", "PostConfigInit", "Default"}
-    for mod in data.get("Modules", []):
-        phase = mod.get("LoadingPhase", "")
-        if phase not in accepted:
-            record(FAIL, "MLSLabsRenderer_Uplugin",
-                   f"module '{mod.get('Name')}' LoadingPhase={phase!r} — unexpected value")
-            return
-    phases = [(m.get("Name"), m.get("LoadingPhase")) for m in data.get("Modules", [])]
-    record(PASS, "MLSLabsRenderer_Uplugin",
-           " | ".join(f"{n}={p}" for n, p in phases))
+    mods = [m.get("Name", "?") for m in data.get("Modules", [])]
+    record(PASS, "NanoGS_Uplugin", "modules: " + ", ".join(mods))
 
 
-def check_mlslabs_torch_dll():
-    lib_dir = PROJECT_ROOT / "Plugins/MLSLabsRenderer/Source/ThirdParty/libTorch/lib"
-    required = ["torch_cuda.dll", "c10.dll", "asmjit.dll"]
-    missing = [name for name in required if not (lib_dir / name).exists()]
-    if missing:
-        record(FAIL, "MLSLabsRenderer_TorchDLL",
-               f"torch DLLs missing ({', '.join(missing)}) — run Tools/fix_mlslabs.bat")
+def check_nanogs_binaries():
+    bindir = PROJECT_ROOT / "Plugins/NanoGS/Binaries"
+    dll = bindir / "Win64/UnrealEditor-NanoGS.dll"
+    if dll.exists():
+        record(PASS, "NanoGS_Binaries", "UnrealEditor-NanoGS.dll present")
+    elif bindir.exists():
+        record(WARN, "NanoGS_Binaries",
+               "Binaries/ exists but UnrealEditor-NanoGS.dll missing — rebuild editor target")
     else:
-        record(PASS, "MLSLabsRenderer_TorchDLL")
-
-
-def check_mlslabs_binaries():
-    dll = PROJECT_ROOT / "Plugins/MLSLabsRenderer/Binaries/Win64/UnrealEditor-MLSLabsRenderer.dll"
-    if not dll.exists():
-        record(WARN, "MLSLabsRenderer_Binaries", "plugin DLL missing — needs rebuild")
-    else:
-        record(PASS, "MLSLabsRenderer_Binaries")
+        record(FAIL, "NanoGS_Binaries",
+               "Plugins/NanoGS/Binaries/ missing — build VirtualProductionSplatEditor first")
 
 
 def check_unrealclaude_uplugin():
@@ -143,7 +127,6 @@ API_KEY_PATTERN = re.compile(r'sk-ant-[a-zA-Z0-9]|wlt_[a-zA-Z0-9]')
 def check_no_hardcoded_api_keys():
     scan_dirs = [
         PROJECT_ROOT / "Source",
-        PROJECT_ROOT / "Plugins/VirtualProductionSplat",
     ]
     hits = []
     for d in scan_dirs:
@@ -171,7 +154,7 @@ def check_uproject_plugins():
         return
     with open(uproject) as f:
         data = json.load(f)
-    required = {"MLSLabsRenderer", "UnrealClaude"}
+    required = {"NanoGS", "UnrealClaude"}
     found = {}
     for p in data.get("Plugins", []):
         name = p.get("Name", "")
@@ -196,7 +179,7 @@ def check_panorama_script():
 
 
 def check_convert_script():
-    # Search common locations
+    # SPZ -> PLY converter (pure-Python, numpy only) used by the import runner.
     candidates = [
         PROJECT_ROOT / "Source/VirtualProductionSplatEditor/ConvertSpzToPly.py",
         PROJECT_ROOT / "Source/VirtualProductionSplat/ConvertSpzToPly.py",
@@ -217,22 +200,6 @@ def check_ue_python():
         record(FAIL, "UEPythonExe", f"not found: {UE_PYTHON}")
 
 
-def check_torch_importable():
-    if not UE_PYTHON.exists():
-        record(WARN, "TorchImportable", "UE Python not found — skipping import check")
-        return
-    try:
-        out = subprocess.check_output(
-            [str(UE_PYTHON), "-c", "import torch; print('ok', torch.__version__)"],
-            text=True, timeout=15, stderr=subprocess.STDOUT
-        )
-        record(PASS, "TorchImportable", out.strip())
-    except subprocess.CalledProcessError as e:
-        record(FAIL, "TorchImportable", e.output.strip()[:200])
-    except Exception as e:
-        record(WARN, "TorchImportable", f"check failed: {e}")
-
-
 def check_numpy_importable():
     if not UE_PYTHON.exists():
         record(WARN, "NumpyImportable", "UE Python not found — skipping import check")
@@ -250,7 +217,7 @@ def check_numpy_importable():
 
 
 # ---------------------------------------------------------------------------
-# BUILD CHECKS
+# BUILD / GIT CHECKS
 # ---------------------------------------------------------------------------
 
 def check_ddc_size():
@@ -261,14 +228,14 @@ def check_ddc_size():
     total = sum(f.stat().st_size for f in ddc.rglob("*") if f.is_file())
     gb = total / 1024 ** 3
     if gb > 10.0:
-        record(WARN, "DDCSize", f"{gb:.1f} GB — consider wiping with fix_mlslabs.bat")
+        record(WARN, "DDCSize", f"{gb:.1f} GB — consider wiping Saved/DerivedDataCache")
     else:
         record(PASS, "DDCSize", f"{gb:.1f} GB")
 
 
 def check_no_nested_git():
     nested = []
-    for plugin_dir in ["Plugins/SplatRenderer", "Plugins/UnrealClaude"]:
+    for plugin_dir in ["Plugins/UnrealClaude"]:
         git_dir = PROJECT_ROOT / plugin_dir / ".git"
         if git_dir.exists():
             nested.append(plugin_dir)
@@ -285,7 +252,6 @@ def check_git_status_clean():
             cwd=str(PROJECT_ROOT), text=True, stderr=subprocess.DEVNULL
         ).strip()
         if out:
-            # Count only tracked modified files (lines not starting with ??)
             tracked = [l for l in out.splitlines() if not l.startswith("??")]
             if tracked:
                 record(WARN, "GitStatus_Clean",
@@ -324,16 +290,14 @@ def check_unrealclaude_submodule():
 check_api_key_worldlabs()
 check_api_key_anthropic()
 check_defaultgame_not_tracked()
-check_mlslabs_uplugin()
-check_mlslabs_torch_dll()
-check_mlslabs_binaries()
+check_nanogs_uplugin()
+check_nanogs_binaries()
 check_unrealclaude_uplugin()
 check_no_hardcoded_api_keys()
 check_uproject_plugins()
 check_panorama_script()
 check_convert_script()
 check_ue_python()
-check_torch_importable()
 check_numpy_importable()
 check_ddc_size()
 check_no_nested_git()

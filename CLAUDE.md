@@ -1,32 +1,24 @@
 # VirtualProductionSplat — Claude Project Context
 
 ## Daily Workflow
-- **Build:**  `Tools\build.bat`   (runs preflight → Build.bat)
-- **Launch:** `Tools\launch.bat`  (runs preflight → editor -dx12)
-- **MLSLabsRenderer broken?** Run: `Tools\fix_mlslabs.bat`
+- **Build:**  `Tools\build.bat`   (runs preflight → Build.bat, target `VirtualProductionSplatEditor Win64 Development`)
+- **Launch:** `Tools\launch.bat`  (runs preflight → editor `-dx12`; DX12/SM5 required for NanoGS compute splat render)
 
 ## Pre-flight Checks (`Tools/preflight.py`)
-Run manually: `python Tools/preflight.py`  
-Exit 0 = all clear. Exit 1 = fix FAILs before proceeding.  
-18 checks: API keys, plugin health, source hygiene, Python deps, git state, submodule init.
-
-## MLSLabsRenderer Rules
-- **NEVER** modify files inside `Plugins/MLSLabsRenderer/`
-- **NEVER** let `git filter-repo` or `git clean` touch ThirdParty DLLs
-- `torch_cuda.dll` source of truth: `libtorch-win-shared-with-deps-2.7.0+cu128/libtorch/lib/`
-- Plugin LoadingPhase is `PostConfigInit` (vendor default) — do not change
-- All splat loading goes through `GaussianSplatImportRunner` / `MLSGaussianSplatInterop` — no direct MLSLabsRenderer API calls from new code
-- If plugin fails: `Tools\fix_mlslabs.bat`
+Run manually: `python Tools/preflight.py`
+Exit 0 = all clear. Exit 1 = fix FAILs before proceeding.
+16 checks: API keys, NanoGS plugin health, UnrealClaude submodule, source hygiene, Python deps, git state.
 
 ## Pipeline
-Greybox scene in UE5 → **single 360° equirectangular PNG** (cube capture) → WorldLabs Marble (`world_prompt.type`: **`image`**) → Gaussian Splat (.ply) → SplatRenderer Plugin in UE5 → Virtual Production / ICVFX stage
+Greybox scene in UE5 → **single 360° equirectangular PNG** (cube capture) → WorldLabs Marble (`world_prompt.type`: **`image`**) → Gaussian Splat (.ply) → **NanoGS** plugin in UE5 → Virtual Production / ICVFX stage
 
 ## Project Structure
 - Content/Greybox/           — greybox scene assets and level
-- Content/GaussianSplats/    — imported .ply splat assets
+- Content/GaussianSplats/    — imported .ply splat assets / UGaussianSplatAsset
 - Content/VirtualProduction/ — ICVFX and nDisplay configs
-- Source/VirtualProductionSplat/ — C++ source
-- Plugins/SplatRenderer/     — Gaussian Splat .ply renderer (DazaiStudio)
+- Source/VirtualProductionSplat/ — C++ runtime source
+- Source/VirtualProductionSplatEditor/ — C++ editor source
+- Plugins/NanoGS/            — Gaussian Splat renderer (real-time 3DGS, Nanite-style LOD)
 - Plugins/UnrealClaude/      — Claude Code CLI in-editor (submodule: github.com/Natfii/UnrealClaude; actual plugin at `Plugins/UnrealClaude/UnrealClaude/`)
 - Saved/GreyboxExports/      — auto-generated **`panorama_360.png`** (equirectangular; gitignored)
 
@@ -49,20 +41,22 @@ Greybox scene in UE5 → **single 360° equirectangular PNG** (cube capture) →
   4. `GET .../worlds/{world_id}` → parse **.ply** download URL from JSON
 - Delegates: `OnWorldReady(FString PLYDownloadURL)`, `OnWorldFailed`, `OnPollTick(OperationID, Status)`
 
-### 3. SplatRenderer Plugin (Phase 4)
-- Plugin path: Plugins/SplatRenderer/
-- UBT module name: **SplatRenderer** (see `Plugins/SplatRenderer/SplatRenderer.uplugin`)
-- Primary actor: **`ACSGaussianActor`** — `LoadPLY(FString)`, `PLYFilePath`, `SplatScale`, optional crop/FX
-- Project helpers: `UGaussianSplatImportHelper::SpawnGaussianSplatAt`, `AGaussianSplatImportRunner` (CallInEditor)
-- Imported / downloaded `.ply` files typically under `Content/GaussianSplats/` (e.g. after `AWorldLabsRunner::DownloadSplat`)
-- Low-level PLY parsing (`CSGaussian::FCSPLYLoader`) stays inside the plugin; project code uses **`ACSGaussianActor` only**
+### 3. NanoGS Plugin (splat rendering)
+NanoGS ships **real public headers** (`NANOGS_API`) — project code links it directly (no reflection).
+- **Module dependency:** `NanoGS` in `VirtualProductionSplat.Build.cs` (`PublicDependencyModuleNames`); `NanoGSEditor` in `VirtualProductionSplatEditor.Build.cs` inside `if (Target.bBuildEditor)`.
+- **Asset model:** a `.ply` becomes a **`UGaussianSplatAsset`**. An **`AGaussianSplatActor`** (holds a **`UGaussianSplatComponent`**) renders it via `SetSplatAsset(Asset)`; splat size via component `SplatScale` (0.1–10).
+- **Runtime / transient import:** `FPLYFileReader::ReadPLYFile` → `NewObject<UGaussianSplatAsset>` → `InitializeFromSplatData(Splats, EGaussianQualityLevel::VeryHigh)`. (`InitializeFromSplatData` is runtime-safe.)
+- **Editor / persistent import:** `UGaussianSplatAssetFactory::FactoryCreateFile` (module `NanoGSEditor`, `#if WITH_EDITOR`) → saved asset under `/Game/GaussianSplats`, visible in the Content Browser.
+- **Project integration surface:** all splat loading goes through **`FMLSGaussianSplatInterop`** / **`UGaussianSplatImportHelper`** / **`AGaussianSplatImportRunner`** — do not call NanoGS internals from new pipeline code.
+  - (`FMLSGaussianSplatInterop` keeps its legacy name for source-compat; it now wraps NanoGS, not the old MLSLabsRenderer.)
+- **GPU requirement:** SM5 / DX12 (compute-shader sort + cluster cull). The runner aborts with a toast if feature level < SM5 or shaders are still compiling.
 
 ### 4. Virtual Production / ICVFX (Phase 5)
-- **`AVPPipelineOrchestrator`**: wires **SceneBuilder, `APanoramicCapture360` (property `CameraRig`), `APanoramicExportRunner` (`ExportRunner`), WorldLabsRunner, SplatImporter, StageSetup**; **Run Full Pipeline** calls **`CapturePanorama()`** / **`Capture360()`** (not multi-camera export)
+- **`AVPPipelineOrchestrator`**: wires **SceneBuilder, `APanoramicCapture360` (property `CameraRig`), `APanoramicExportRunner` (`ExportRunner`), WorldLabsRunner, SplatImporter, StageSetup**; **Run Full Pipeline** calls **`CapturePanorama()`** / **`Capture360()`**
 - **`AVPStageSetup`**: **Step1–4** — find cine camera, add fill lights, post process volume, log summary
 - Level: `Content/VirtualProduction/VP_Stage.umap` (manual create)
 - nDisplay / LED: Epic Quick Start; **Mac** lacks full nDisplay — use **Win64/Linux** for cluster
-- **`ACSGaussianActor`** as background plate; **`BP_CameraTracker`**: manual Blueprint (not in C++ repo)
+- **`AGaussianSplatActor`** as background plate; **`BP_CameraTracker`**: manual Blueprint (not in C++ repo)
 
 ### 5. Pipeline Control Panel (Phase 3–4)
 - EditorUtilityWidget: EUW_PipelineControl
@@ -82,136 +76,80 @@ Greybox scene in UE5 → **single 360° equirectangular PNG** (cube capture) →
 - Error handling: retry logic on WorldLabs polling, HTTP timeout handling
 
 ## Platform Notes
-- Primary build: macOS (Apple Silicon) for development
-- nDisplay and full ICVFX output targets: Windows / Linux (nDisplay SupportedTargetPlatforms excludes Mac)
-- SplatRenderer compiled with deprecation warnings in CSGaussianBuffers.h — upstream issue, do not modify
+- Primary target: **Win64** (NanoGS compute render + nDisplay)
+- nDisplay / full ICVFX output: Windows / Linux (nDisplay SupportedTargetPlatforms excludes Mac)
 - Node.js required for UnrealClaude MCP bridge:
-    cd "Plugins/UnrealClaude/UnrealClaude/Resources/mcp-bridge" && npm install
+    `cd "Plugins/UnrealClaude/UnrealClaude/Resources/mcp-bridge" && npm install`
 
-## Config — DefaultGame.ini
+## Config — DefaultGame.ini  (gitignored — never commit real keys)
+```
 [WorldLabsAPI]
 APIKey=YOUR_KEY_HERE
 ; Optional override (must be full https URL):
 ; WorldsBaseURL=https://api.worldlabs.ai/marble/v1
+```
 
 ## External References
 - WorldLabs Marble API host: https://api.worldlabs.ai
-- SplatRenderer Plugin: https://github.com/DazaiStudio/SplatRenderer-UEPlugin
 - UnrealClaude Plugin: https://github.com/Natfii/UnrealClaude
 - UE5 HTTP Module docs: https://docs.unrealengine.com/5.0/en-US/API/Runtime/HTTP/
 
 ## End-to-End Usage (Editor Workflow)
 
 ### One-time setup
-
 1. After clone: `git submodule update --init --recursive`
 2. Add `APIKey` to `Config/DefaultGame.ini` under `[WorldLabsAPI]`
 3. `npm install` in `Plugins/UnrealClaude/UnrealClaude/Resources/mcp-bridge/` (requires Node.js; note double `UnrealClaude` in path)
-4. Open UE5 editor and open `Content/Greybox/GreyboxScene.umap` (create/save the level if it does not exist yet)
+4. Build (`Tools\build.bat`), then open `Content/Greybox/GreyboxScene.umap`
 
 ### Per-session pipeline
+Place these actors in the level (or use **`AVPPipelineOrchestrator`**, assign references, then **Run Full Pipeline** / **Log Pipeline Status**):
 
-Place these actors in the level (or use **`AVPPipelineOrchestrator`**, assign references to each, then **Run Full Pipeline** / **Log Pipeline Status**):
+**Step 1 — Build greybox** — place **`AGreyboxSceneBuilder`** → **Build Greybox Scene**
 
-**Step 1 — Build greybox**  
-Place **`AGreyboxSceneBuilder`** → Details → **Build Greybox Scene**
-
-**Step 2 — Panorama capture + export**  
-Place **`APanoramicCapture360`** → **Capture360** (or orchestrator **Run Full Pipeline**)  
-Place **`APanoramicExportRunner`** → **CapturePanorama** (delegates to the rig’s **`Capture360`**)  
+**Step 2 — Panorama capture + export** — place **`APanoramicCapture360`** → **Capture360**; place **`APanoramicExportRunner`** → **CapturePanorama**
 → **`panorama_360.png`** under `Saved/GreyboxExports/` (unless **`OutputPath`** is set)
 
-**Step 3 — WorldLabs**  
-Place **`AWorldLabsRunner`** → set **World Prompt** → **Submit To World Labs**  
-→ Poll with **Check Job Status** (auto-poll every 5s after submit)  
-→ When **Current Status** indicates complete → **Download Splat**  
+**Step 3 — WorldLabs** — place **`AWorldLabsRunner`** → set **World Prompt** → **Submit To World Labs** → **Check Job Status** (auto-poll) → **Download Splat**
 → `.ply` saved under `Content/GaussianSplats/`
 
-**Step 4 — Import splat**  
-Place **`AGaussianSplatImportRunner`** → set **PLY File Path** → **Import PLY Into Level**  
-→ **`ACSGaussianActor`** spawned at the runner’s transform (or fixed spawn location)
+**Step 4 — Import splat** — place **`AGaussianSplatImportRunner`** → set **PLY File Path** → **Import PLY Into Level**
+→ a **`UGaussianSplatAsset`** is imported (editor factory) and an **`AGaussianSplatActor`** is spawned at the greybox center / runner transform. (`.spz` inputs auto-convert via `ConvertSpzToPly.py`.)
 
-**Step 5 — VP stage**  
-Place **`AVPStageSetup`** → assign **Gaussian Splat Actor** ref  
-→ **Step1 Find Camera** → **Step2 Add Fill Lights** → **Step3 Add Post Process** → **Step4 Log Stage Summary**
+**Step 5 — VP stage** — place **`AVPStageSetup`** → assign **Gaussian Splat Actor** ref → **Step1 Find Camera** → **Step2 Add Fill Lights** → **Step3 Add Post Process** → **Step4 Log Stage Summary**
 
-**Step 6 — Camera tracking (manual)**  
-**`BP_CameraTracker`** is not shipped as C++ in this project — create a Blueprint (e.g. Pawn or actor with spring arm + camera) for in-editor fly navigation, or use editor viewport navigation.
+**Step 6 — Camera tracking (manual)** — create a **`BP_CameraTracker`** Blueprint (pawn + spring arm + camera) or use editor viewport navigation.
 
 ### nDisplay / LED volume (Windows / Linux only)
+See Epic’s nDisplay Quick Start. Use `Content/VirtualProduction/VP_Stage.umap` as inner-frustum content. A **`CineCameraActor`** labeled **`PrimaryCamera`** (from the greybox builder) is a natural ICVFX camera candidate.
 
-See Epic’s nDisplay Quick Start. Use `Content/VirtualProduction/VP_Stage.umap` (create as needed) as inner-frustum content. A **`CineCameraActor`** labeled **`PrimaryCamera`** (from the greybox builder) is a natural ICVFX camera candidate.
-
-## Phase 2 — C++ files added
-
+## Key C++ files
 | File | Purpose |
 |------|---------|
 | `Source/VirtualProductionSplat/MultiAngleCameraRig.h/.cpp` | **`APanoramicCapture360`** — cube capture, `Capture360()`, equirect PNG |
-| `Source/VirtualProductionSplat/GreyboxExporter.h/.cpp` | `UGreyboxExporter::ExportAllCameras` → finds **`APanoramicCapture360`**, calls **`Capture360`** |
-| `Source/VirtualProductionSplatEditor/GreyboxSceneBuilder.h/.cpp` | `AGreyboxSceneBuilder::BuildGreyboxScene` |
+| `Source/VirtualProductionSplat/GreyboxExporter.h/.cpp` | `UGreyboxExporter::ExportAllCameras` |
+| `Source/VirtualProductionSplat/WorldLabsAPIClient.h/.cpp` | **`UWorldLabsAPIClient`** — HTTP submit / poll / download |
+| `Source/VirtualProductionSplat/MLSGaussianSplatInterop.h/.cpp` | **`FMLSGaussianSplatInterop`** — NanoGS bridge (ply→asset→actor) |
+| `Source/VirtualProductionSplat/GaussianSplatImportHelper.h/.cpp` | **`UGaussianSplatImportHelper`** — Blueprint spawn wrapper |
+| `Source/VirtualProductionSplatEditor/GreyboxSceneBuilder.h/.cpp` | **`AGreyboxSceneBuilder`** |
 | `Source/VirtualProductionSplatEditor/GreyboxExportRunner.h/.cpp` | **`APanoramicExportRunner::CapturePanorama`** |
-| `Source/VirtualProductionSplatEditor/VirtualProductionSplatEditor.*` | Editor module |
-| `.gitignore` | Ignores `Saved/GreyboxExports/` |
-
-## Phase 3 Complete — Files Added
-
-- `Source/VirtualProductionSplat/WorldLabsImageHelper.h` — header-only API (implementation in `.cpp`)
-- `Source/VirtualProductionSplat/WorldLabsImageHelper.cpp`
-- `Source/VirtualProductionSplat/WorldLabsAPIClient.h/.cpp` — `UWorldLabsAPIClient` (HTTP JSON submit/poll/download; `DECLARE_DELEGATE_*` callbacks)
-- `Source/VirtualProductionSplatEditor/WorldLabsRunner.h/.cpp` — `AWorldLabsRunner` (CallInEditor: submit / poll / download)
+| `Source/VirtualProductionSplatEditor/WorldLabsRunner.h/.cpp` | **`AWorldLabsRunner`** (CallInEditor submit/poll/download) |
+| `Source/VirtualProductionSplatEditor/GaussianSplatImportRunner.h/.cpp` | **`AGaussianSplatImportRunner::ImportPLYIntoLevel`** (NanoGS factory import + spawn) |
+| `Source/VirtualProductionSplatEditor/VPStageSetup.h/.cpp` | **`AVPStageSetup`** |
+| `Source/VirtualProductionSplatEditor/VPPipelineOrchestrator.h/.cpp` | **`AVPPipelineOrchestrator`** |
 
 ### WorldLabs Marble API (verify against live API)
-
 - **`world_prompt.type`:** use **`"image"`** for panoramic equirectangular PNGs submitted via `media_asset_id`. Valid API values are **`text`**, **`image`**, **`multi-image`**, **`video`** — there is **no** `panorama` type (422 if used).
 - **prepare_upload** → `media_asset.media_asset_id`, `upload_info.upload_url` (+ optional `required_headers` for GCS PUT)
 - **worlds:generate** → `operation_id` (or nested under `operation`)
 - **operations/{id}** → `done`, `response.world_id` when finished
-- **GET worlds/{world_id}** → recursive JSON scan for an `https` URL referencing `.ply` (also checks common string fields)
+- **GET worlds/{world_id}** → recursive JSON scan for an `https` URL referencing `.ply`
+- Adjust parsing in `OnGenerationResponse` / `OnPollOperationResponse` / `OnFetchWorldResponse` if the live API differs.
+- `UWorldLabsAPIClient` must be owned by an `AActor` (valid `UWorld`) so `GetTimerManager()` works for polling.
+- Download uses a plain **GET** (signed CDN links); add headers in `DownloadPLYFile` if your tenant requires authenticated download.
 
-Adjust parsing in `OnGenerationResponse` / `OnPollOperationResponse` / `OnFetchWorldResponse` if the live API differs.
-
-### Notes
-
-- `UWorldLabsAPIClient` must be owned by an `AActor` (or other outer with a valid `UWorld`) so `GetTimerManager()` works for polling.
-- Download uses a plain **GET** on the URL (typical for signed CDN links); add headers in `DownloadPLYFile` if your tenant requires authenticated download.
-
-## Phase 4 — Step 4.0 (discovery)
-
-| Finding | Detail |
-|--------|--------|
-| **Module name** | `SplatRenderer` (Runtime, `LoadingPhase`: PostConfigInit) |
-| **Build.cs** | Required on **`VirtualProductionSplat`** once project code `#include "CSGaussianActor.h"` (or other plugin public headers). Listed under **`PublicDependencyModuleNames`**. |
-| **Editor module** | **`VirtualProductionSplatEditor`** also lists **`SplatRenderer`** in **`PrivateDependencyModuleNames`** for direct includes in editor-only `.cpp` files. |
-| **Integration surface** | **`ACSGaussianActor::LoadPLY`** — no need to link private `FCSPLYLoader` from game code. |
-| **Prior builds** | Editor/game could compile without `SplatRenderer` in project **Build.cs** until no project translation unit included plugin headers. |
-| **Upstream** | RHI deprecation warnings in `CSGaussianBuffers.h` — do not modify (plugin vendor). |
-
-## Phase 4 — Implementation (4.1–4.4)
-
-### 4.1 — Module dependency
-- `Source/VirtualProductionSplat/VirtualProductionSplat.Build.cs`: **`SplatRenderer`** added to **`PublicDependencyModuleNames`**.
-- `Source/VirtualProductionSplatEditor/VirtualProductionSplatEditor.Build.cs`: **`SplatRenderer`** added to **`PrivateDependencyModuleNames`**.
-
-### 4.2 — `UGaussianSplatImportHelper`
-- `Source/VirtualProductionSplat/GaussianSplatImportHelper.h/.cpp` — **`SpawnGaussianSplatAt`**: spawns **`ACSGaussianActor`**, sets **`SplatScale`**, calls **`LoadPLY`**; **`UE_LOG(LogVPSplat, ...)`**.
-
-### 4.3 — `AGaussianSplatImportRunner`
-- `Source/VirtualProductionSplatEditor/GaussianSplatImportRunner.h/.cpp` — editor actor: **`PLYFilePath`**, **`ImportPLYIntoLevel`** (CallInEditor), optional spawn-at-self vs fixed location; default path `Content/GaussianSplats/WorldLabs_export.ply`; logs via **`LogTemp`**.
-
-### 4.4 — Build
-- Confirmed: **`Build.sh VirtualProductionSplatEditor Mac Development`** succeeds after the above.
-
-## Phase 5 — Files Added
-
-| File | Purpose |
-|------|---------|
-| `Source/VirtualProductionSplatEditor/VPStageSetup.h/.cpp` | **`AVPStageSetup`** — VP stage steps 1–4 (camera, fills, post, log) |
-| `Source/VirtualProductionSplatEditor/VPPipelineOrchestrator.h/.cpp` | **`AVPPipelineOrchestrator`** — full pipeline runner + status log |
-
-### Remaining manual editor-only work (no further C++ required for this pipeline)
-
+## Remaining manual editor-only work
 - Create/save **`GreyboxScene.umap`**, **`VP_Stage.umap`** if not present
-- Optional Blueprints: **`BP_PanoramicCapture360`** (parent **`APanoramicCapture360`**), **`BP_CameraTracker`**, EUW widgets
-- **WorldLabs**: real API field names / auth if different from assumptions
-- **nDisplay / ICVFX** production setup on **Win64/Linux**; content packaging for LED
-- **UnrealClaude** `npm install` in `Plugins/UnrealClaude/UnrealClaude/Resources/mcp-bridge/` when using MCP bridge
+- Optional Blueprints: **`BP_PanoramicCapture360`**, **`BP_CameraTracker`**, EUW widgets
+- WorldLabs: confirm live API field names / auth
+- nDisplay / ICVFX production setup on **Win64/Linux**; content packaging for LED
