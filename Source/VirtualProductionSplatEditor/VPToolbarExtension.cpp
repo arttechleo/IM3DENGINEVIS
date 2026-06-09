@@ -16,7 +16,6 @@
 #include "ToolMenus.h"
 #include "Widgets/SWindow.h"
 #include "GaussianSplatImportRunner.h"
-#include "MLSLabsEditorVerification.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "EngineUtils.h"
@@ -187,35 +186,43 @@ void FVPToolbarExtension::OnImportLatestSplat()
 		return;
 	}
 
-	FString LatestSpzPath;
-	FDateTime LatestTime(0);
+	FString LatestPlyPath, LatestSpzPath;
+	FDateTime LatestPlyTime(0), LatestSpzTime(0);
 
 	IFileManager::Get().IterateDirectory(
 		*Dir,
-		[&LatestSpzPath, &LatestTime](const TCHAR* Path, bool bIsDirectory) -> bool
+		[&](const TCHAR* Path, bool bIsDirectory) -> bool
 		{
 			if (bIsDirectory)
 			{
 				return true;
 			}
 			const FString S(Path);
-			if (!S.EndsWith(TEXT(".spz"), ESearchCase::IgnoreCase))
-			{
-				return true;
-			}
-
 			const FDateTime TS = IFileManager::Get().GetTimeStamp(Path);
-			if (LatestSpzPath.IsEmpty() || TS > LatestTime)
+			if (S.EndsWith(TEXT(".ply"), ESearchCase::IgnoreCase))
 			{
-				LatestTime = TS;
-				LatestSpzPath = S;
+				if (LatestPlyPath.IsEmpty() || TS > LatestPlyTime)
+				{
+					LatestPlyTime = TS;
+					LatestPlyPath = S;
+				}
+			}
+			else if (S.EndsWith(TEXT(".spz"), ESearchCase::IgnoreCase))
+			{
+				if (LatestSpzPath.IsEmpty() || TS > LatestSpzTime)
+				{
+					LatestSpzTime = TS;
+					LatestSpzPath = S;
+				}
 			}
 			return true;
 		});
 
-	if (LatestSpzPath.IsEmpty())
+	// Prefer newest .ply (NanoGS native); fall back to .spz (the runner auto-converts).
+	const FString ImportPath = !LatestPlyPath.IsEmpty() ? LatestPlyPath : LatestSpzPath;
+	if (ImportPath.IsEmpty())
 	{
-		UE_LOG(LogTemp, Error, TEXT("VPToolbar: no .spz found in %s"), *Dir);
+		UE_LOG(LogTemp, Error, TEXT("VPToolbar: no .ply or .spz found in %s"), *Dir);
 		return;
 	}
 
@@ -231,38 +238,16 @@ void FVPToolbarExtension::OnImportLatestSplat()
 		return;
 	}
 
-	Runner->PLYFilePath = LatestSpzPath;
+	Runner->PLYFilePath = ImportPath;
 	Runner->ImportPLYIntoLevel();
 
 	const bool bOk = Runner->LastSpawnedSplat != nullptr;
-	const FString Msg = bOk ? FString::Printf(TEXT("Imported splat: %s"), *LatestSpzPath) : FString::Printf(TEXT("Import failed: %s"), *LatestSpzPath);
+	const FString Msg = bOk ? FString::Printf(TEXT("Imported splat: %s"), *ImportPath) : FString::Printf(TEXT("Import failed: %s"), *ImportPath);
 
 	FNotificationInfo Info(FText::FromString(Msg));
 	Info.ExpireDuration = 4.0f;
 	Info.bUseLargeFont = false;
 	FSlateNotificationManager::Get().AddNotification(Info);
-}
-
-void FVPToolbarExtension::OnVerifyMLSLabs()
-{
-	FMLSLabsEditorVerification::LogFullReport();
-}
-
-void FVPToolbarExtension::FillVirtualProductionSplatSubMenu(UToolMenu* Menu)
-{
-	if (!Menu)
-	{
-		return;
-	}
-	FToolMenuSection& Sec = Menu->AddSection(
-		TEXT("VPSplat_MLSLabs"),
-		NSLOCTEXT("VPToolbarExtension", "VPSplatMLSSection", "MLSLabs"));
-	Sec.AddEntry(FToolMenuEntry::InitMenuEntry(
-		TEXT("VPSplat_VerifyMLS"),
-		NSLOCTEXT("VPToolbarExtension", "VerifyMLS", "Verify MLSLabs"),
-		NSLOCTEXT("VPToolbarExtension", "VerifyMLSTT", "Run MLSLabsRenderer self-check; results in Output Log (LogVPSplat)."),
-		FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tools"),
-		FUIAction(FExecuteAction::CreateStatic(&FVPToolbarExtension::OnVerifyMLSLabs))));
 }
 
 void FVPToolbarExtension::OnOpenWorldPreview()
@@ -344,17 +329,6 @@ void FVPToolbarExtension::Register()
 			NSLOCTEXT("VPToolbarExtension", "OpenWorldPreviewTooltip", "Open the generated world in the WorldLabs browser preview (available after job completes)."),
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.OpenLevel"),
 			FUIAction(FExecuteAction::CreateStatic(&FVPToolbarExtension::OnOpenWorldPreview))));
-
-		FToolMenuSection& VpSection = Menu->AddSection(
-			TEXT("VirtualProductionSplatRoot"),
-			NSLOCTEXT("VPToolbarExtension", "VPRootSection", "VirtualProductionSplat"));
-		VpSection.AddSubMenu(
-			TEXT("VPSplat_Sub"),
-			NSLOCTEXT("VPToolbarExtension", "VPSplatSub", "VirtualProductionSplat"),
-			NSLOCTEXT("VPToolbarExtension", "VPSplatSubTT", "Diagnostics and MLSLabs utilities."),
-			FNewToolMenuDelegate::CreateStatic(&FVPToolbarExtension::FillVirtualProductionSplatSubMenu),
-			false,
-			FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tools"));
 	}));
 }
 
