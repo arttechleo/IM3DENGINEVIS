@@ -14,7 +14,7 @@
 1. **Panorama quality** — verify current capture produces clean neutral-grey panorama with no purple, no sky bleed, no pipeline actors visible. Screenshot required.
 2. **Commit working state** — 9 modified files uncommitted. Commit or discard before proceeding.
 3. **Cleanup GaussianSplats/** — 22 .spz / 7 .ply accumulating with no gitignore. Add to .gitignore, delete test artifacts (test_output.ply, manual_test_output.ply).
-4. **Reconcile PosZ/NegZ hack** — either revert cpp to original + keep FILE_REMAP, or compile the cpp fix + remove FILE_REMAP. Currently both active = double-hack debt.
+4. **PosZ/NegZ orientation** — RESOLVED. Single fix: FILE_REMAP in StitchEquirectangular.py. cpp rotations are stock. NOTE comment in MultiAngleCameraRig.cpp documents the coupling.
 
 ### P1 — Apple-grade pipeline quality
 5. **Greybox material** — M_Greybox_Neutral (unlit 50% grey) must visually verify as flat grey in capture, not purple. Python overpaint with BasicShapeMaterial as fallback.
