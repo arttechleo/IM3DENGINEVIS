@@ -19,6 +19,10 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialExpressionConstant3Vector.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "UObject/Package.h"
 #include "ScopedTransaction.h"
 #include "UObject/UnrealType.h"
 
@@ -29,22 +33,42 @@ namespace GreyboxSceneBuilderInternal
 
 	static UMaterialInterface* EnsureGreyboxMaterial()
 	{
-		const FString AssetPath = TEXT("/Game/Greybox/M_Greybox.M_Greybox");
-		if (UEditorAssetLibrary::DoesAssetExist(AssetPath))
+		// Flat 50% grey, UNLIT — so the greybox reads as a neutral spatial marker with no
+		// lighting, shadow bleed, or color tint polluting the 360 capture sent to WorldLabs.
+		const FString ObjectPath = TEXT("/Game/Greybox/M_Greybox_Neutral.M_Greybox_Neutral");
+		if (UEditorAssetLibrary::DoesAssetExist(ObjectPath))
 		{
-			return LoadObject<UMaterialInterface>(nullptr, *AssetPath);
+			return LoadObject<UMaterialInterface>(nullptr, *ObjectPath);
 		}
 
 		UEditorAssetLibrary::MakeDirectory(TEXT("/Game/Greybox"));
-		UObject* Duplicated = UEditorAssetLibrary::DuplicateAsset(
-			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"),
-			TEXT("/Game/Greybox/M_Greybox"));
-		if (Duplicated)
+
+		UPackage* Package = CreatePackage(TEXT("/Game/Greybox/M_Greybox_Neutral"));
+		UMaterial* Mat = Package ? NewObject<UMaterial>(Package, TEXT("M_Greybox_Neutral"), RF_Public | RF_Standalone) : nullptr;
+		if (!Mat)
 		{
-			return Cast<UMaterialInterface>(Duplicated);
+			UE_LOG(LogTemp, Error, TEXT("GreyboxSceneBuilder: failed to create M_Greybox_Neutral — falling back to BasicShapeMaterial."));
+			return LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 		}
 
-		return LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+		Mat->SetShadingModel(MSM_Unlit);
+
+#if WITH_EDITOR
+		UMaterialExpressionConstant3Vector* GreyConst = NewObject<UMaterialExpressionConstant3Vector>(Mat);
+		GreyConst->Constant = FLinearColor(0.5f, 0.5f, 0.5f, 1.0f);
+		Mat->GetEditorOnlyData()->ExpressionCollection.Expressions.Add(GreyConst);
+
+		// Unlit shading uses Emissive as the final pixel color → flat grey, no tint, no shadows.
+		Mat->GetEditorOnlyData()->EmissiveColor.Expression = GreyConst;
+		Mat->PostEditChange();
+#endif
+
+		FAssetRegistryModule::AssetCreated(Mat);
+		Package->MarkPackageDirty();
+		UEditorAssetLibrary::SaveLoadedAsset(Mat, false);
+
+		UE_LOG(LogTemp, Warning, TEXT("GreyboxSceneBuilder: created flat 50%% grey unlit material /Game/Greybox/M_Greybox_Neutral."));
+		return Mat;
 	}
 
 	static void DestroyPreviousGreybox(UWorld* World)
@@ -187,14 +211,14 @@ namespace GreyboxSceneBuilderInternal
 			return LoadObject<UMaterialInterface>(nullptr, *AssetPath);
 		}
 
-		if (!UEditorAssetLibrary::DoesAssetExist(TEXT("/Game/Greybox/M_Greybox.M_Greybox")))
+		if (!UEditorAssetLibrary::DoesAssetExist(TEXT("/Game/Greybox/M_Greybox_Neutral.M_Greybox_Neutral")))
 		{
 			return nullptr;
 		}
 
 		UEditorAssetLibrary::MakeDirectory(TEXT("/Game/Greybox"));
 		UObject* Duplicated = UEditorAssetLibrary::DuplicateAsset(
-			TEXT("/Game/Greybox/M_Greybox.M_Greybox"),
+			TEXT("/Game/Greybox/M_Greybox_Neutral.M_Greybox_Neutral"),
 			TEXT("/Game/Greybox/M_Horizon"));
 		if (Duplicated)
 		{

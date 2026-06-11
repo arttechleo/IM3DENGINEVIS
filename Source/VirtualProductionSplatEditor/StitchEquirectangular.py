@@ -58,9 +58,16 @@ def stitch():
     faces_dir = os.path.normpath(os.path.join(project_saved, "GreyboxExports", "faces"))
     output_path = os.path.normpath(os.path.join(project_saved, "GreyboxExports", "panorama_360.png"))
 
+    # Capture-side PosZ/NegZ rotations are swapped in the running editor build
+    # (constructor pitch -90/+90 reversed; the C++ fix is not compiled). Compensate here:
+    # the logical "up" face (sampled at the zenith) is actually stored in face_NegZ.png, and
+    # the logical "down" face (nadir) in face_PosZ.png. Remap the file each logical face loads.
+    FILE_REMAP = {"PosZ": "NegZ", "NegZ": "PosZ"}
+
     face_imgs = {}
     for name in FACE_ORDER:
-        path = os.path.join(faces_dir, "face_%s.png" % name)
+        file_face = FILE_REMAP.get(name, name)
+        path = os.path.join(faces_dir, "face_%s.png" % file_face)
         if not os.path.isfile(path):
             log_error("StitchEquirectangular: missing %s" % path)
             return False

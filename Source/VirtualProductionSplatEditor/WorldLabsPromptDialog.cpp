@@ -204,13 +204,15 @@ void SWorldLabsPromptDialog::Construct(const FArguments& InArgs)
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 4.f)
 			[
-				SNew(STextBlock).Text(NSLOCTEXT("WorldLabsPromptDialog", "PreviewLabel", "Generation Prompt (editable):"))
+				SNew(STextBlock).Text(NSLOCTEXT("WorldLabsPromptDialog", "PreviewLabel", "Your Prompt (this is the primary instruction):"))
 			]
 			+ SVerticalBox::Slot().FillHeight(1.f)
 			[
 				SAssignNew(PreviewTextBox, SMultiLineEditableTextBox)
 				.IsReadOnly(false)
 				.AutoWrapText(true)
+				.HintText(NSLOCTEXT("WorldLabsPromptDialog", "PromptHint",
+					"Describe the environment you want — style, time of day, materials, atmosphere."))
 				.OnTextChanged_Lambda([this](const FText& T)
 				{
 					// Only capture user edits (SetText doesn't fire this)
@@ -405,6 +407,9 @@ void SWorldLabsPromptDialog::SavePromptToHistory()
 
 void SWorldLabsPromptDialog::UpdatePromptPreview()
 {
+	// The auto-built scene description is a FALLBACK HINT only — used solely when the
+	// user leaves the prompt box empty. It is NEVER injected into the editable box as
+	// the primary prompt; the user's own text always leads (see GetPrompt / OnSubmitClicked).
 	EnteredPrompt = FWorldLabsPromptBuilder::BuildPrompt(
 		SelectedEnvironment,
 		SelectedTimeOfDay,
@@ -412,14 +417,11 @@ void SWorldLabsPromptDialog::UpdatePromptPreview()
 		AdditionalNotes,
 		SceneAnalysis);
 
-	if (PreviewTextBox.IsValid())
+	// Keep the editable box showing the user's own text (or the hint placeholder when empty).
+	// SetText does NOT fire OnTextChanged, so UserEditedPrompt stays intact.
+	if (PreviewTextBox.IsValid() && UserEditedPrompt.IsEmpty())
 	{
-		// Programmatic SetText does NOT fire OnTextChanged, so UserEditedPrompt stays intact.
-		// Only update box if user hasn't manually overridden the prompt.
-		if (UserEditedPrompt.IsEmpty())
-		{
-			PreviewTextBox->SetText(FText::FromString(EnteredPrompt));
-		}
+		PreviewTextBox->SetText(FText::GetEmpty());
 	}
 }
 
@@ -784,10 +786,16 @@ void SWorldLabsPromptDialog::OnAnalyzeRefineComplete(FString Refined)
 
 FReply SWorldLabsPromptDialog::OnSubmitClicked()
 {
-	// Use user-edited prompt if provided, otherwise keep auto-generated EnteredPrompt
-	if (!UserEditedPrompt.IsEmpty())
+	// User's typed prompt always leads. Only when the box is left empty do we fall back
+	// to the auto-generated scene description (refreshed here) as a hint.
+	const FString UserText = UserEditedPrompt.TrimStartAndEnd();
+	if (!UserText.IsEmpty())
 	{
-		EnteredPrompt = UserEditedPrompt;
+		EnteredPrompt = UserText;
+	}
+	else
+	{
+		UpdatePromptPreview(); // recompute fallback EnteredPrompt from current selections
 	}
 	SavePromptToHistory();
 	bSubmitted = true;

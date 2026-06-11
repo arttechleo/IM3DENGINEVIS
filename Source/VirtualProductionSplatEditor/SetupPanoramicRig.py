@@ -70,25 +70,8 @@ def setup_and_capture():
         )
         return
 
-    mesh_actors = [a for a in all_actors if a.get_class().get_name() == "StaticMeshActor"]
-
-    if mesh_actors:
-        min_x = min(a.get_actor_location().x for a in mesh_actors)
-        max_x = max(a.get_actor_location().x for a in mesh_actors)
-        min_y = min(a.get_actor_location().y for a in mesh_actors)
-        max_y = max(a.get_actor_location().y for a in mesh_actors)
-        center_x = (min_x + max_x) / 2.0
-        center_y = (min_y + max_y) / 2.0
-    else:
-        center_x = 0.0
-        center_y = 0.0
-
-    eye_level_z = 180.0
-    new_location = unreal.Vector(center_x, center_y, eye_level_z)
-    panoramic_rig.set_actor_location(new_location, False, True)
-    unreal.log("SetupPanoramicRig: moved rig to %s" % new_location)
-
-    hide_class_names = [
+    # ---- Classes that are pipeline tooling, never part of the captured environment ----
+    pipeline_class_names = [
         "PanoramicCapture360",
         "GreyboxSceneBuilder",
         "PanoramicExportRunner",
@@ -98,21 +81,86 @@ def setup_and_capture():
         "VPPipelineOrchestrator",
         "CineCameraActor",
     ]
+    sky_tokens = ["sky", "horizon", "atmosphere", "fog", "sun"]
 
-    actors_to_hide = []
-    for actor in all_actors:
-        class_name = actor.get_class().get_name()
-        if any(h == class_name or (h in class_name) for h in hide_class_names):
-            actors_to_hide.append(actor)
+    def _is_pipeline(actor):
+        cn = actor.get_class().get_name()
+        return any(h == cn or (h in cn) for h in pipeline_class_names)
 
-    # Also hide actors whose labels suggest they cause sky artifacts
-    additional_hide_labels = ["Ramp", "HorizonPlane", "Horizon"]
+    def _is_sky(actor):
+        label = actor.get_actor_label().lower()
+        if any(t in label for t in sky_tokens):
+            return True
+        for tag in actor.tags:
+            if any(t in str(tag).lower() for t in sky_tokens):
+                return True
+        return False
+
+    def _has_tag(actor, tagname):
+        return any(str(t).lower() == tagname.lower() for t in actor.tags)
+
+    def _is_greybox_geo(actor):
+        if _is_pipeline(actor) or _is_sky(actor):
+            return False
+        if _has_tag(actor, "VPGreybox"):
+            return True
+        return actor.get_class().get_name() == "StaticMeshActor"
+
+    # ---- Fix 3: place rig at greybox bounding-box centroid (XY), eye level Z = 160cm ----
+    geo_actors = [a for a in all_actors if _is_greybox_geo(a)]
+    if geo_actors:
+        min_x = min_y = float("inf")
+        max_x = max_y = float("-inf")
+        for a in geo_actors:
+            origin, extent = a.get_actor_bounds(False)
+            min_x = min(min_x, origin.x - extent.x)
+            max_x = max(max_x, origin.x + extent.x)
+            min_y = min(min_y, origin.y - extent.y)
+            max_y = max(max_y, origin.y + extent.y)
+        center_x = (min_x + max_x) / 2.0
+        center_y = (min_y + max_y) / 2.0
+    else:
+        center_x = 0.0
+        center_y = 0.0
+        unreal.log_warning("SetupPanoramicRig: no greybox geometry found — placing rig at origin.")
+
+    eye_level_z = 160.0
+    new_location = unreal.Vector(center_x, center_y, eye_level_z)
+    panoramic_rig.set_actor_location(new_location, False, True)
+    unreal.log("SetupPanoramicRig: moved rig to bounds centroid %s (from %d geo actors)" % (new_location, len(geo_actors)))
+
+    # ---- Fix 1: hide EVERYTHING except the greybox geometry we explicitly want captured ----
+    keep_label_tokens = ["ground", "wall_north", "wall_east", "wall_west", "pillar"]
+
+    def _is_keeper(actor):
+        if actor.get_class().get_name() != "StaticMeshActor":
+            return False
+        if _has_tag(actor, "VPGreybox"):
+            return True
+        label = actor.get_actor_label().lower()
+        return any(tok in label for tok in keep_label_tokens)
+
+    actors_to_hide = [a for a in all_actors if not _is_keeper(a)]
+
+    # ---- Fix 2: hide only sky-atmosphere and fog (they bleed sky/ocean into the capture). ----
+    # Keep SkyLight + DirectionalLight ON so the lit greybox material reads correctly.
+    sky_class_tokens = ["SkyAtmosphere", "ExponentialHeightFog"]
+    sky_hidden = 0
     for actor in all_actors:
-        label = actor.get_actor_label()
-        if any(h.lower() in label.lower() for h in additional_hide_labels):
+        cn = actor.get_class().get_name()
+        if any(tok in cn for tok in sky_class_tokens):
             if actor not in actors_to_hide:
                 actors_to_hide.append(actor)
-                unreal.log(f"SetupPanoramicRig: hiding artifact actor: {label}")
+            sky_hidden += 1
+    unreal.log("SetupPanoramicRig: flagged %d sky-atmosphere/fog actor(s) for hiding" % sky_hidden)
+
+    # ---- Diagnostic: exactly what is visible vs hidden during capture ----
+    hide_set = set(actors_to_hide)
+    for a in all_actors:
+        line = "KEEP: %s (%s)" % (a.get_actor_label(), a.get_class().get_name()) if a not in hide_set \
+            else "HIDE: %s (%s)" % (a.get_actor_label(), a.get_class().get_name())
+        print(line)
+        unreal.log(line)
 
     for actor in actors_to_hide:
         if hasattr(actor, "set_actor_hidden_in_game"):
@@ -120,7 +168,26 @@ def setup_and_capture():
         elif hasattr(actor, "SetActorHiddenInGame"):
             actor.SetActorHiddenInGame(True)
 
-    unreal.log("SetupPanoramicRig: hid %d pipeline actors from game/capture" % len(actors_to_hide))
+    kept = [a for a in all_actors if _is_keeper(a)]
+    unreal.log("SetupPanoramicRig: hid %d actors, kept %d greybox geo actor(s)" % (len(actors_to_hide), len(kept)))
+
+    # ---- Fix 3: force flat grey LIT material onto every StaticMeshActor before capture ----
+    # Lights are on now, so use the default UE grey (BasicShapeMaterial) — no purple, works with lighting.
+    neutral_mat = unreal.EditorAssetLibrary.load_asset("/Engine/BasicShapes/BasicShapeMaterial")
+    if neutral_mat is None:
+        unreal.log_warning("SetupPanoramicRig: /Engine/BasicShapes/BasicShapeMaterial not found.")
+    else:
+        painted = 0
+        for actor in all_actors:
+            if actor.get_class().get_name() != "StaticMeshActor":
+                continue
+            smc = actor.get_component_by_class(unreal.StaticMeshComponent)
+            if smc is None:
+                continue
+            for i in range(smc.get_num_materials()):
+                smc.set_material(i, neutral_mat)
+            painted += 1
+        unreal.log("SetupPanoramicRig: applied BasicShapeMaterial (flat grey) to %d StaticMeshActor(s)" % painted)
 
     _deselect_all(editor_subsystem)
 

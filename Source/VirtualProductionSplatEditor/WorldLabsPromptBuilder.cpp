@@ -18,9 +18,38 @@ FSceneAnalysisResult FWorldLabsPromptBuilder::AnalyzeScene(UWorld* World)
 	Result.GreyboxActorCount = GreyboxActors.Num();
 	if (GreyboxActors.Num() == 0) return Result;
 
+	// Sky-dome / atmosphere actors have engine-scale bounds (millions of cm) that wreck
+	// the scene footprint. Exclude anything whose label or tags read as sky/atmosphere.
+	auto IsSkyDomeActor = [](const AActor* A) -> bool
+	{
+		static const TCHAR* SkyTokens[] = { TEXT("sky"), TEXT("horizon"), TEXT("atmosphere"), TEXT("fog"), TEXT("sun") };
+		const FString Name = A->GetActorLabel().ToLower();
+		for (const TCHAR* Tok : SkyTokens)
+			if (Name.Contains(Tok)) return true;
+		for (const FName& Tag : A->Tags)
+		{
+			const FString T = Tag.ToString().ToLower();
+			for (const TCHAR* Tok : SkyTokens)
+				if (T.Contains(Tok)) return true;
+		}
+		return false;
+	};
+
 	FBox SceneBox(EForceInit::ForceInit);
+	int32 ExcludedSkyActors = 0;
 	for (AActor* A : GreyboxActors)
+	{
+		if (IsSkyDomeActor(A)) { ExcludedSkyActors++; continue; }
 		SceneBox += A->GetComponentsBoundingBox(true);
+	}
+	if (ExcludedSkyActors > 0)
+		UE_LOG(LogTemp, Warning, TEXT("PromptBuilder: excluded %d sky/atmosphere actor(s) from scene bounds."), ExcludedSkyActors);
+
+	if (!SceneBox.IsValid)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("PromptBuilder: no usable bounds after sky exclusion — skipping spatial analysis."));
+		return Result;
+	}
 
 	Result.SceneBoundsMin = SceneBox.Min;
 	Result.SceneBoundsMax = SceneBox.Max;

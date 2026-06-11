@@ -311,6 +311,8 @@ void UWorldLabsAPIClient::SubmitGenerationRequest(const FString& MediaAssetId)
 		? SystemInstruction
 		: PendingGenerationPrompt + TEXT("\n\n") + SystemInstruction;
 
+	UE_LOG(LogVPSplat, Warning, TEXT("SubmitGenerationRequest: prompt = %s"), *FinalPrompt.Left(200));
+
 	TSharedPtr<FJsonObject> WP = MakeShared<FJsonObject>();
 	WP->SetStringField(TEXT("type"), TEXT("image"));
 	WP->SetObjectField(TEXT("image_prompt"), ImagePrompt);

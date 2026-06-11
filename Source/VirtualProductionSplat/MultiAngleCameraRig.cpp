@@ -23,13 +23,15 @@ namespace PanoramicCapture360Internal
 		TEXT("NegZ"),
 	};
 
+	// NOTE: the vertical orientation is corrected in StitchEquirectangular.py (FILE_REMAP swaps
+	// face_PosZ/face_NegZ). Do NOT "fix" the PosZ/NegZ pitch here too — that would double-swap.
 	static const FRotator FaceRotations[6] = {
-		FRotator(0.0, 0.0, 0.0),
-		FRotator(0.0, 180.0, 0.0),
-		FRotator(0.0, 90.0, 0.0),
-		FRotator(0.0, -90.0, 0.0),
-		FRotator(-90.0, 0.0, 0.0),
-		FRotator(90.0, 0.0, 0.0),
+		FRotator(0.0, 0.0, 0.0),    // PosX: +X
+		FRotator(0.0, 180.0, 0.0),  // NegX: -X
+		FRotator(0.0, 90.0, 0.0),   // PosY: +Y
+		FRotator(0.0, -90.0, 0.0),  // NegY: -Y
+		FRotator(-90.0, 0.0, 0.0),  // PosZ slot (pitch -90)
+		FRotator(90.0, 0.0, 0.0),   // NegZ slot (pitch +90)
 	};
 }
 

@@ -211,28 +211,26 @@ void AWorldLabsRunner::SubmitToWorldLabs()
 	UE_LOG(LogTemp, Log, TEXT("WorldLabsRunner: panorama ready — %s"), *PanoramaPath);
 	PendingPanoramaPath = PanoramaPath;
 
-	if (bUseClaudeRefinement)
-	{
-		FString AnthropicKey;
-		if (GConfig)
-		{
-			GConfig->GetString(TEXT("AnthropicAPI"), TEXT("APIKey"), AnthropicKey, GGameIni);
-		}
-		if (!AnthropicKey.IsEmpty() && AnthropicKey != TEXT("YOUR_KEY_HERE"))
-		{
-			EnsurePromptRefiner();
-			PostOrUpdateNotification(TEXT("Refining prompt..."));
-			PromptRefiner->RefinePrompt(
-				AnthropicKey,
-				PanoramaPath,
-				WorldPrompt,
-				StyleReferenceImagePaths,
-				FWorldLabsPromptBuilder::AnalyzeScene(GetWorld()),
-				FOnRefinedPrompt::CreateUObject(this, &AWorldLabsRunner::OnRefinedPrompt));
-			return;
-		}
-		UE_LOG(LogTemp, Warning, TEXT("WorldLabsRunner: AnthropicAPI key not set — skipping Claude refinement."));
-	}
+	// Claude prompt refinement is disabled for now. The ~1.4MB base64 panorama POST to the
+	// Anthropic API is unreliable and adds no value when the key is misconfigured. Submit the
+	// user prompt as-is.
+	// TODO: Re-enable when Anthropic key is valid and request is lightweight (no base64 image).
+	// if (bUseClaudeRefinement)
+	// {
+	//     FString AnthropicKey;
+	//     if (GConfig) { GConfig->GetString(TEXT("AnthropicAPI"), TEXT("APIKey"), AnthropicKey, GGameIni); }
+	//     if (!AnthropicKey.IsEmpty() && AnthropicKey != TEXT("YOUR_KEY_HERE"))
+	//     {
+	//         EnsurePromptRefiner();
+	//         PostOrUpdateNotification(TEXT("Refining prompt..."));
+	//         PromptRefiner->RefinePrompt(
+	//             AnthropicKey, PanoramaPath, WorldPrompt, StyleReferenceImagePaths,
+	//             FWorldLabsPromptBuilder::AnalyzeScene(GetWorld()),
+	//             FOnRefinedPrompt::CreateUObject(this, &AWorldLabsRunner::OnRefinedPrompt));
+	//         return;
+	//     }
+	//     UE_LOG(LogTemp, Warning, TEXT("WorldLabsRunner: AnthropicAPI key not set — skipping Claude refinement."));
+	// }
 
 	PollStartSeconds = FPlatformTime::Seconds();
 	PostOrUpdateNotification(TEXT("Generating world..."));
